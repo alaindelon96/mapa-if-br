@@ -3,6 +3,7 @@
 # Dados / planilhas
 pandas==3.0.5
 openpyxl==3.1.5
+pyarrow==22.0.0   # engine de leitura/escrita .parquet usada pelo pandas
 
 # Geoprocessamento
 geopandas==1.1.4
