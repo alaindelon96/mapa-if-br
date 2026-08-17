@@ -1,0 +1,20 @@
+# mapa-if-sul — dependências (versões estáveis em 2026-08-17)
+
+# Dados / planilhas
+pandas==3.0.5
+openpyxl==3.1.5
+
+# Geoprocessamento
+geopandas==1.1.4
+shapely==2.1.2
+pyproj==3.7.2
+
+# Mapas
+folium==0.20.0
+
+# Utilitários
+requests==2.34.2
+Unidecode==1.4.0
+
+# Testes
+pytest==9.1.1

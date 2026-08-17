@@ -1,0 +1,49 @@
+# Ambientes virtuais
+venv/
+.venv/
+env/
+ENV/
+
+# Bytecode / cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Build / distribuição
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Testes e cobertura
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+
+# Tipagem / lint
+.mypy_cache/
+.ruff_cache/
+
+# Dados brutos e saídas geradas
+# (padrão com /* em vez de /, para que a negação do .gitkeep funcione)
+data/raw/*
+!data/raw/.gitkeep
+output/*.html
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Editores / SO
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Variáveis de ambiente
+.env
+.env.local
