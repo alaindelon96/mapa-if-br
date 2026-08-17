@@ -1,8 +1,11 @@
 """Ponto de entrada do projeto mapa-if-sul."""
 
+from src import pipeline
+
 
 def main() -> None:
-    raise NotImplementedError("Lógica ainda não implementada.")
+    destino = pipeline.executar()
+    print(f"Mapa gerado em: {destino}")
 
 
 if __name__ == "__main__":
