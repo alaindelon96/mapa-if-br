@@ -115,6 +115,9 @@ ZOOM_INICIAL = 6
 #: alias reconhecido pelo folium (ex.: "OpenStreetMap", "CartoDB dark_matter").
 TILES_PADRAO = "CartoDB positron"
 
+#: Destino do mapa interativo gerado por `src.mapa`.
+ARQUIVO_MAPA = OUTPUT_DIR / "mapa_if_sul.html"
+
 # --------------------------------------------------------------------------- #
 # Recorte de instituições
 # --------------------------------------------------------------------------- #
