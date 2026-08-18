@@ -73,11 +73,11 @@ COLUNAS_TEXTO = [
 #:   ~58% das linhas é o CEP geral do município (terminado em ``-000``), que
 #:   não identifica logradouro — `src.cnefe` trata os dois casos em níveis de
 #:   precisão diferentes;
-#: * `numero` — o número do imóvel; vem em coluna própria em 89% dos postos,
-#:   mas em só 34% das agências, onde costuma estar embutido no `endereco`
-#:   depois da vírgula. A extração de um a partir do outro é feita na
-#:   geocodificação, não aqui, para que este módulo continue publicando o que a
-#:   fonte publica;
+#: * `numero` — o número do imóvel; vem em coluna própria em 88% dos postos,
+#:   mas em só 17% das agências (medido no recorte RS/SC/PR da safra 202606:
+#:   344 de 2.060), onde ele costuma estar embutido no `endereco` depois da
+#:   vírgula. A extração de um a partir do outro é feita na geocodificação, não
+#:   aqui, para que este módulo continue publicando o que a fonte publica;
 #: * `bairro` — 98% preenchido; não entra no casamento hoje, e é carregado por
 #:   ser o desempate óbvio caso uma safra futura precise dele.
 COLUNAS_ENDERECO_BACEN = ["endereco", "numero", "bairro", "cep"]
