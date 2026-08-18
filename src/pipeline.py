@@ -42,6 +42,7 @@ from __future__ import annotations
 
 import logging
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 import geopandas as gpd
@@ -73,6 +74,62 @@ def _abrir_etapa(numero: int, titulo: str) -> float:
     print(f"# ETAPA {numero}/{TOTAL_ETAPAS} — {titulo}")
     print("#" * 78)
     return time.perf_counter()
+
+
+class EtapaFalhou(RuntimeError):
+    """Erro em uma etapa, carregando qual etapa foi.
+
+    Existe para que `main` possa dizer "a ETAPA 2/5 falhou" sem manter uma
+    cópia da lista de etapas: quem conhece a ordem é este módulo, e quem
+    conversa com o usuário é o `main`. A causa original fica em `__cause__`
+    intacta — `main` a inspeciona para escolher o diagnóstico (falha de rede
+    no IBGE, planilha ausente, malha degradada).
+
+    `KeyboardInterrupt` NÃO é embrulhada: ela deriva de `BaseException`, e o
+    ``except Exception`` que produz esta exceção não a alcança. Ctrl+C
+    continua subindo limpo até o `main`.
+
+    Attributes:
+        numero: posição da etapa, de 1 a `TOTAL_ETAPAS`.
+        titulo: nome da etapa, como aparece no cabeçalho.
+    """
+
+    def __init__(self, numero: int, titulo: str, causa: Exception) -> None:
+        super().__init__(f"ETAPA {numero}/{TOTAL_ETAPAS} ({titulo}) falhou: {causa}")
+        self.numero = numero
+        self.titulo = titulo
+
+
+def _rodar_etapa[T](
+    numero: int,
+    titulo: str,
+    rotulo: str,
+    acao: Callable[[], T],
+    duracoes: dict[str, float],
+) -> T:
+    """Roda uma etapa cronometrada, marcando de quem é a falha.
+
+    Args:
+        numero: posição da etapa, de 1 a `TOTAL_ETAPAS`.
+        titulo: nome exibido no cabeçalho.
+        rotulo: chave curta da etapa no relatório de tempos.
+        acao: a chamada da etapa, já com seus argumentos.
+        duracoes: acumulador ``{rótulo: segundos}``, escrito no lugar.
+
+    Returns:
+        O que `acao` devolveu.
+
+    Raises:
+        EtapaFalhou: qualquer erro da etapa, com a causa original em
+            ``__cause__``.
+    """
+    marco = _abrir_etapa(numero, titulo)
+    try:
+        resultado = acao()
+    except Exception as erro:
+        raise EtapaFalhou(numero, titulo, erro) from erro
+    duracoes[rotulo] = time.perf_counter() - marco
+    return resultado
 
 
 def _imprimir_tempos(duracoes: dict[str, float], total: float) -> None:
@@ -116,32 +173,44 @@ def executar(usar_cache_malha: bool = True, usar_cache_cnefe: bool = True) -> Pa
         O caminho do HTML gravado (``output/mapa_if_sul.html``).
 
     Raises:
-        FileNotFoundError: se as planilhas do BACEN não estiverem em
-            ``data/raw/`` — ver `config.ARQUIVO_AGENCIAS` e
-            `config.ARQUIVO_POSTOS`.
+        EtapaFalhou: se qualquer etapa falhar. A causa original — planilha do
+            BACEN ausente, API do IBGE fora, malha degradada — fica em
+            ``__cause__``, e é dela que `main` tira o diagnóstico.
     """
     inicio = time.perf_counter()
     duracoes: dict[str, float] = {}
 
-    marco = _abrir_etapa(1, "ETL BACEN — agências e postos de RS/SC/PR")
-    etl_bacen.executar()
-    duracoes["1. ETL BACEN"] = time.perf_counter() - marco
-
-    marco = _abrir_etapa(2, "Malha municipal do IBGE")
-    malha = _obter_malha(usar_cache=usar_cache_malha)
-    duracoes["2. Malha do IBGE"] = time.perf_counter() - marco
-
-    marco = _abrir_etapa(3, "Agregação por município")
-    agregacao.executar(malha=malha)
-    duracoes["3. Agregação"] = time.perf_counter() - marco
-
-    marco = _abrir_etapa(4, "Geocodificação dos pontos pelo CNEFE")
-    cnefe.executar(usar_cache=usar_cache_cnefe)
-    duracoes["4. Geocodificação"] = time.perf_counter() - marco
-
-    marco = _abrir_etapa(5, "Mapa interativo")
-    destino = mapa.gera_mapa()
-    duracoes["5. Mapa"] = time.perf_counter() - marco
+    _rodar_etapa(
+        1,
+        "ETL BACEN — agências e postos de RS/SC/PR",
+        "1. ETL BACEN",
+        etl_bacen.executar,
+        duracoes,
+    )
+    malha = _rodar_etapa(
+        2,
+        "Malha municipal do IBGE",
+        "2. Malha do IBGE",
+        lambda: _obter_malha(usar_cache=usar_cache_malha),
+        duracoes,
+    )
+    _rodar_etapa(
+        3,
+        "Agregação por município",
+        "3. Agregação",
+        lambda: agregacao.executar(malha=malha),
+        duracoes,
+    )
+    _rodar_etapa(
+        4,
+        "Geocodificação dos pontos pelo CNEFE",
+        "4. Geocodificação",
+        lambda: cnefe.executar(usar_cache=usar_cache_cnefe),
+        duracoes,
+    )
+    destino = _rodar_etapa(
+        5, "Mapa interativo", "5. Mapa", mapa.gera_mapa, duracoes
+    )
 
     print()
     _imprimir_tempos(duracoes, time.perf_counter() - inicio)
