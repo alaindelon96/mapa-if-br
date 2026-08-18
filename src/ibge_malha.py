@@ -29,7 +29,7 @@ import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-from src import config
+from src import config, rede
 from src.etl_bacen import padronizar_municipio_ibge
 
 _LOGGER = logging.getLogger(__name__)
@@ -89,6 +89,7 @@ def criar_sessao_http(tentativas: int = 4, backoff: float = 1.5) -> requests.Ses
     Returns:
         Sessão HTTP configurada; use como *context manager* para fechá-la.
     """
+    rede.usar_certificados_do_sistema()
     politica = Retry(
         total=tentativas,
         backoff_factor=backoff,

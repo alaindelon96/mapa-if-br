@@ -16,6 +16,11 @@ folium==0.20.0
 # Utilitários
 requests==2.34.2
 Unidecode==1.4.0
+# Faz o TLS validar pelo repositório de certificados do Windows/macOS em vez do
+# pacote embutido do certifi. Sem ele, máquina com antivírus ou proxy que
+# inspeciona HTTPS derruba TODA chamada ao IBGE com CERTIFICATE_VERIFY_FAILED.
+# Ver src/rede.py — a dependência é opcional, o projeto roda sem ela.
+truststore==0.10.4
 
 # Testes
 pytest==9.1.1
