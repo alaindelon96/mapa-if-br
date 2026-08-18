@@ -15,7 +15,7 @@ sozinha durante o desenvolvimento.
 | 2 | `src.ibge_malha` | malha municipal do Sul + nome oficial e população | `data/raw/malha_municipios_sul.geojson` |
 | 3 | `src.agregacao` | junta os dois pelo código IBGE, uma linha por município | `data/processed/agregado_municipio.parquet` |
 | 4 | `src.cnefe` | resolve a coordenada de cada ponto contra o Cadastro Nacional de Endereços do Censo 2022 | `data/processed/pontos_geocodificados.parquet` |
-| 5 | `src.mapa` | coroplético reativo + camadas de ponto em dois níveis | `output/mapa_if_sul.html` |
+| 5 | `src.mapa` | coroplético reativo, camadas de ponto em dois níveis, busca de município e recorte por UF | `output/mapa_if_sul.html` |
 
 A etapa 4 baixa ~580 MB do CNEFE (um arquivo por UF) para `data/raw/cnefe/` na
 primeira execução e os reaproveita nas seguintes — o CNEFE é um produto do

@@ -65,27 +65,77 @@ por `cnefe.desempatar_coincidentes`, com raio sempre menor que a incerteza do
 nível de precisão que o ponto declara.
 
 --------------------------------------------------------------------------
-Modo de visão: município OU ponto de atendimento
+Modo de visão: município, ponto de atendimento, ou os dois
 --------------------------------------------------------------------------
 
-O topo do painel traz um seletor com as duas leituras do mesmo recorte
-(`MODOS_VISAO`): **nível cidade**, só os polígonos, e **nível pontos de
-atendimento**, só os marcadores. O mapa abre em `MODO_INICIAL`.
+O topo do painel traz um seletor com as três leituras do mesmo recorte
+(`MODOS_VISAO`): **nível cidade**, com os municípios pintados; **nível pontos
+de atendimento**, com os marcadores; e **cidade + pontos**, com as duas
+sobrepostas. O mapa abre em `MODO_INICIAL`.
 
-O que o modo NÃO faz é mexer na seleção de bandeiras. As duas leituras são da
-mesma seleção, com efeitos diferentes: no nível cidade as bandeiras marcadas
-decidem a COR dos municípios, no nível de pontos decidem QUAIS marcadores
-aparecem. Por isso a lista de bandeiras continua ativa nos dois modos, e trocar
-de modo preserva o que estava marcado.
+O que o modo NÃO faz é mexer na seleção de bandeiras. As leituras são da mesma
+seleção, com efeitos diferentes: no nível cidade as bandeiras marcadas decidem
+a COR dos municípios, no nível de pontos decidem QUAIS marcadores aparecem. Por
+isso a lista de bandeiras continua ativa nos três modos, e trocar de modo
+preserva o que estava marcado.
 
-A troca é feita escondendo *panes* do Leaflet, e não adicionando e removendo
-camadas — a diferença é de correção, não de estilo, e está explicada em
-`_JS_CONTROLADOR`: mexer nas camadas por fora do painel faz o `L.Control.Layers`
-se reconstruir e recopiar cada caixa de seleção da presença da camada no mapa,
-o que desmarcava as 14 bandeiras ao entrar no modo cidade. Para que o
-coroplético possa ser escondido sem levar os marcadores junto, ele recebe um
-pane próprio — por padrão os dois desenhariam no mesmo ``overlayPane`` e, com
-`prefer_canvas`, no mesmo ``<canvas>``.
+A DIVISA de município é desenhada em todos os modos: no nível de pontos o
+polígono perde o preenchimento e sobra o fio. Sem ele, um marcador no interior
+não diz a que cidade pertence — e é essa a pergunta que o mapa responde. O que
+o modo liga e desliga é o preenchimento (com ele, a legenda e o clique no
+polígono), nunca a camada.
+
+Os marcadores são escondidos por *pane* do Leaflet, e não adicionando e
+removendo camadas — a diferença é de correção, não de estilo, e está explicada
+em `_JS_CONTROLADOR`: mexer nas camadas por fora do painel faz o
+`L.Control.Layers` se reconstruir e recopiar cada caixa de seleção da presença
+da camada no mapa, o que desmarcava as 14 bandeiras ao entrar no modo cidade.
+Para que o coroplético seja controlado sem levar os marcadores junto, ele
+desenha num pane próprio (`PANE_COROPLETICO`) — por padrão os dois estariam no
+mesmo ``overlayPane`` e, com `prefer_canvas`, no mesmo ``<canvas>``.
+
+--------------------------------------------------------------------------
+Recorte por estado
+--------------------------------------------------------------------------
+
+Abaixo do modo de visão, o painel traz o filtro de UF: com um estado marcado, o
+mapa se enquadra nele (`fitBounds` nos limites daquela UF) e os outros dois
+SOMEM inteiros — polígono, divisa estadual e marcadores. Não é só um zoom.
+
+Sumir é mais forte do que esmaecer, e é o ponto: a escala de cores, a legenda,
+os totais do painel e a busca passam a falar só do estado escolhido. Um estado
+vizinho deixado à mostra continuaria disputando a leitura das classes, que são
+recalculadas sobre o recorte visível.
+
+Nos marcadores o recorte é feito trocando o conteúdo de cada subgrupo em lote
+(`addLayers`/`removeLayers` do MarkerCluster), e não escondendo ponto a ponto:
+balão de contagem que sobrevivesse com os pontos escondidos mostraria um número
+que não corresponde a nada na tela.
+
+--------------------------------------------------------------------------
+Divisa estadual
+--------------------------------------------------------------------------
+
+As três UFs entram como uma camada própria (`adicionar_divisas_uf`), dissolvida
+a partir da mesma malha municipal — não há segundo download nem risco de as
+duas fronteiras discordarem. O traço é bem mais grosso que o do município
+(`LARGURA_DIVISA_UF` contra `LARGURA_CONTORNO_MUNICIPIO`), porque a hierarquia
+território -> município tem de se ler de relance, e vai num pane acima do
+coroplético e abaixo dos pontos, sem receber eventos de mouse.
+
+--------------------------------------------------------------------------
+Busca de município
+--------------------------------------------------------------------------
+
+O canto superior esquerdo traz um campo de busca com sugestões. O casamento é
+por texto normalizado (sem acento e sem caixa), então "sao lourenco" acha
+"São Lourenço do Sul"; prefixo vem antes de trecho no meio do nome. Escolher um
+resultado enquadra o município e, nos modos em que o polígono está pintado,
+abre o popup dele.
+
+A lista sai da própria camada de municípios já carregada no navegador — nenhum
+índice extra é embarcado no HTML — e respeita o filtro de UF: com um estado
+marcado, só os municípios dele são sugeridos.
 
 --------------------------------------------------------------------------
 Cor do marcador: a bandeira, e não a categoria
@@ -178,6 +228,7 @@ import folium
 import geopandas as gpd
 import pandas as pd
 from branca.element import Element, MacroElement
+from folium.map import CustomPane
 from folium.plugins import FeatureGroupSubGroup, MarkerCluster
 from jinja2 import Template
 
@@ -267,6 +318,47 @@ COR_ZERO = "#eceff1"
 #: Cor de município sem dado (valor nulo). Distinta de `COR_ZERO`.
 COR_SEM_DADO = "#e6e6e6"
 
+#: Cor e espessura do contorno de município.
+#:
+#: Duas espessuras porque o fio faz dois papéis. Com o preenchimento à vista
+#: (modo cidade), ele apenas separa duas manchas de cor e pode ser fino a ponto
+#: de sumir. No modo de pontos não há mancha nenhuma: o fio é a ÚNICA divisa
+#: desenhada sobre o basemap, e em 0,4 px ele praticamente não se lê no
+#: Positron. Daí engrossar quando o preenchimento sai.
+COR_CONTORNO_MUNICIPIO = "#8c98a4"
+LARGURA_CONTORNO_MUNICIPIO = 0.4
+LARGURA_CONTORNO_MUNICIPIO_SEM_FUNDO = 0.8
+
+#: Opacidade do preenchimento do coroplético.
+OPACIDADE_COROPLETICO = 0.78
+
+#: Traço da divisa entre estados.
+#:
+#: Grosso e escuro contra o fio claro e fino do município: a diferença entre os
+#: dois é o que faz a hierarquia UF -> município ser lida sem legenda. O cinza
+#: azulado escuro tem contraste sobre o Positron sem o peso do preto, que
+#: brigaria com os marcadores.
+COR_DIVISA_UF = "#37474f"
+LARGURA_DIVISA_UF = 2.4
+
+#: Painéis (*panes*) do Leaflet criados para este mapa, e o z-index de cada um.
+#:
+#: Os padrões do Leaflet que importam aqui: ladrilhos em 200, ``overlayPane``
+#: (onde caem os marcadores de ponto) em 400 e ``markerPane`` (os balões de
+#: contagem) em 600. Os dois panes abaixo se encaixam nessa ordem — coroplético
+#: como fundo, divisa estadual por cima dele, ambos abaixo dos pontos, que é a
+#: ordem de leitura: polígono é fundo, ponto é figura.
+#:
+#: Os panes são criados em Python (`criar_mapa_base`) e não no controlador em
+#: JavaScript: o pane precisa existir ANTES de a camada ser adicionada, porque é
+#: no `onAdd` que o Leaflet escolhe o renderizador dela. Criado depois, o
+#: controlador teria de retirar e repor a camada — e retirar/repor camada por
+#: fora do painel faz o `L.Control.Layers` se reconstruir (ver `_JS_CONTROLADOR`).
+PANE_COROPLETICO = "coropletico"
+Z_INDEX_COROPLETICO = 350
+PANE_DIVISAS_UF = "divisas-uf"
+Z_INDEX_DIVISAS_UF = 360
+
 # --------------------------------------------------------------------------- #
 # Camadas de ponto
 # --------------------------------------------------------------------------- #
@@ -326,9 +418,10 @@ COR_GRUPO = {
     CATEGORIA_BANCO: "#5e3c99",
 }
 
-#: Identificadores dos dois modos de visão.
+#: Identificadores dos modos de visão.
 MODO_CIDADE = "cidade"
 MODO_PONTOS = "pontos"
+MODO_AMBOS = "ambos"
 
 #: Rótulo e explicação de cada modo, na ordem em que aparecem no seletor.
 #:
@@ -348,6 +441,11 @@ MODOS_VISAO = [
         "rotulo": "Nível pontos de atendimento",
         "dica": "as bandeiras marcadas mostram seus pontos",
     },
+    {
+        "id": MODO_AMBOS,
+        "rotulo": "Cidade + pontos",
+        "dica": "as duas leituras sobrepostas",
+    },
 ]
 
 #: Modo em que o mapa abre.
@@ -356,6 +454,29 @@ MODOS_VISAO = [
 #: pontos estão todos agrupados em balões e o que se lê de fato é a cor dos
 #: municípios. O modo de pontos é a leitura de quem já aproximou.
 MODO_INICIAL = MODO_CIDADE
+
+#: Texto de apoio do campo de busca de município.
+TEXTO_BUSCA = "Buscar município\u2026"
+
+#: Mínimo de caracteres digitados antes de a busca sugerir alguma coisa.
+#:
+#: Com uma letra só a lista viria cheia e sem serventia — são 1.191 municípios,
+#: e "a" casa com quase todos. Duas já separam o suficiente para valer a pena.
+MIN_CARACTERES_BUSCA = 2
+
+#: Quantas sugestões a busca mostra por vez.
+#:
+#: Oito cabem sem rolagem sob o campo e sem cobrir o mapa. Quem não achou o
+#: município nas oito primeiras digita mais uma letra, que é mais rápido do que
+#: percorrer uma lista longa.
+MAX_SUGESTOES_BUSCA = 8
+
+#: Zoom máximo ao enquadrar o município escolhido na busca.
+#:
+#: `fitBounds` sozinho aproximaria um município pequeno até o nível de rua, onde
+#: não se vê mais nem a divisa dele nem os vizinhos. Doze mostra o município
+#: inteiro com o entorno, que é o enquadramento de quem acabou de procurá-lo.
+ZOOM_BUSCA = 12
 
 #: Raio do marcador em pixels.
 #:
@@ -474,6 +595,80 @@ _CSS_PAINEL = """
     color: #6b7785;
     font-weight: 400;
     font-size: 11px;
+}
+/* Filtro de UF, logo abaixo do modo: as duas escolhas de ESCOPO da leitura
+   ficam juntas e antes da lista de bandeiras, que é escolha de conteúdo. As
+   três siglas cabem numa linha só, então cada uma é um alvo de um clique — um
+   <select> custaria dois para o mesmo efeito. */
+.filtro-uf {
+    margin: 0 0 6px;
+    padding-bottom: 7px;
+    border-bottom: 1px solid #b8c2cc;
+}
+.filtro-uf .filtro-titulo {
+    display: block;
+    margin-bottom: 3px;
+    font-weight: 600;
+}
+.filtro-uf label {
+    display: inline-block;
+    margin: 0 9px 0 0;
+    cursor: pointer;
+}
+.filtro-uf input {
+    margin: 0 3px 0 0;
+    vertical-align: -1px;
+}
+/* Busca de município: campo próprio no canto superior esquerdo, sob o zoom.
+   Fora do painel de camadas de propósito — ali dentro a lista de sugestões
+   ficaria presa ao `overflow-y: auto` do painel e rolaria junto com ele. */
+.busca-municipio {
+    position: relative;
+    width: 224px;
+    font: 12px/1.45 -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+}
+.busca-municipio input {
+    box-sizing: border-box;
+    width: 100%;
+    padding: 6px 8px;
+    border: 1px solid #b8c2cc;
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.96);
+    color: #33414e;
+    font: inherit;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
+}
+.busca-municipio input:focus {
+    outline: 2px solid #2c7fb8;
+    outline-offset: -1px;
+}
+.busca-sugestoes {
+    margin: 3px 0 0;
+    padding: 0;
+    max-height: 232px;
+    overflow-y: auto;
+    list-style: none;
+    background: #fff;
+    border: 1px solid #b8c2cc;
+    border-radius: 4px;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
+}
+.busca-sugestoes[hidden] {
+    display: none;
+}
+.busca-sugestoes li {
+    padding: 4px 8px;
+    cursor: pointer;
+}
+.busca-sugestoes li.ativa {
+    background: #dbeaf5;
+}
+.busca-sugestoes .busca-uf {
+    color: #6b7785;
+}
+.busca-sugestoes .busca-vazio {
+    color: #6b7785;
+    cursor: default;
 }
 /* Amostra da cor da bandeira, do lado do nome dela no painel. Redonda e do
    tamanho do marcador, para ser lida como "este é o ponto no mapa". */
@@ -864,15 +1059,76 @@ def adicionar_coropletico(
         agregado[colunas],
         name="Municípios",
         control=False,
+        # `pane` chega às feições porque o folium repassa os kwargs às opções
+        # do `L.geoJson`, e o Leaflet usa esse mesmo objeto de opções ao
+        # construir cada polígono. Ver `PANE_COROPLETICO` para o porquê.
+        pane=PANE_COROPLETICO,
         style_function=lambda _feicao: {
             "fillColor": COR_ZERO,
-            "color": "#8c98a4",
-            "weight": 0.4,
-            "fillOpacity": 0.78,
+            "color": COR_CONTORNO_MUNICIPIO,
+            "weight": LARGURA_CONTORNO_MUNICIPIO,
+            "fillOpacity": OPACIDADE_COROPLETICO,
         },
         highlight_function=lambda _feicao: {"weight": 2.2, "color": "#333333"},
         tooltip=folium.GeoJsonTooltip(fields=["tooltip_html"], labels=False, sticky=True),
         popup=folium.GeoJsonPopup(fields=["popup_html"], labels=False, max_width=340),
+        smooth_factor=0.5,
+    )
+    camada.add_to(mapa)
+    return camada
+
+
+def dissolver_divisas_uf(agregado: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+    """Une os municípios de cada UF num polígono só, para desenhar a divisa.
+
+    A fronteira estadual é derivada da MESMA malha municipal que o coroplético
+    usa, e não baixada à parte: assim as duas não têm como discordar — a divisa
+    do RS é, por construção, o contorno externo dos 497 municípios desenhados.
+
+    Args:
+        agregado: saída de `carregar_agregado`.
+
+    Returns:
+        GeoDataFrame com uma linha por UF, colunas ``uf`` e ``geometry``.
+    """
+    divisas = agregado[["uf", "geometry"]].dissolve(by="uf", as_index=False)
+    _LOGGER.info(
+        "Divisas estaduais dissolvidas: %s.", ", ".join(sorted(divisas["uf"]))
+    )
+    return divisas
+
+
+def adicionar_divisas_uf(
+    mapa: folium.Map,
+    agregado: gpd.GeoDataFrame,
+) -> folium.GeoJson:
+    """Adiciona a camada da divisa entre estados, por cima do coroplético.
+
+    Entra com ``control=False`` (é fundo, não opção) e ``interactive=False``:
+    a divisa não tem popup nem tooltip, e um polígono do tamanho de um estado
+    capturando o mouse roubaria o clique de todo município e de todo marcador
+    embaixo dela. O pane próprio, sem eventos de ponteiro, é a segunda trava do
+    mesmo problema.
+
+    Args:
+        mapa: mapa base, já com os panes de `criar_mapa_base`.
+        agregado: saída de `carregar_agregado`.
+
+    Returns:
+        A camada adicionada — o controlador reativo a usa para apagar a divisa
+        dos estados que o filtro de UF deixa de fora.
+    """
+    camada = folium.GeoJson(
+        dissolver_divisas_uf(agregado),
+        name="Divisas estaduais",
+        control=False,
+        pane=PANE_DIVISAS_UF,
+        interactive=False,
+        style_function=lambda _feicao: {
+            "color": COR_DIVISA_UF,
+            "weight": LARGURA_DIVISA_UF,
+            "fill": False,
+        },
         smooth_factor=0.5,
     )
     camada.add_to(mapa)
@@ -890,6 +1146,59 @@ def _colunas_por_bandeira() -> list[str]:
         for subs in ORDEM_SUB_CATEGORIAS.values()
         for sub in subs
     ]
+
+
+def limites_por_uf(agregado: gpd.GeoDataFrame) -> dict[str, list[list[float]]]:
+    """Retângulo envolvente de cada UF e do recorte inteiro, no formato do Leaflet.
+
+    É o que o filtro de estado usa para enquadrar o mapa (`fitBounds`), e a
+    chave ``"todos"`` é para onde ele volta ao desmarcar o filtro.
+
+    A caixa sai da geometria de fato, e não de uma constante: `CENTRO_MAPA` e
+    `ZOOM_INICIAL` descrevem o enquadramento de abertura, que é escolha de
+    apresentação; aqui o que se quer é o retângulo real de cada estado.
+
+    Args:
+        agregado: saída de `carregar_agregado`.
+
+    Returns:
+        Ex.: ``{"todos": [[-33.75, -57.65], [-22.52, -48.02]], "RS": [...]}``,
+        cada valor no par ``[[sul, oeste], [norte, leste]]`` que o Leaflet pede.
+    """
+
+    def caixa(recorte: gpd.GeoDataFrame) -> list[list[float]]:
+        oeste, sul, leste, norte = recorte.total_bounds
+        return [[float(sul), float(oeste)], [float(norte), float(leste)]]
+
+    limites = {"todos": caixa(agregado)}
+    for uf, do_estado in agregado.groupby("uf"):
+        limites[str(uf)] = caixa(do_estado)
+    return limites
+
+
+def ufs_do_recorte(agregado: gpd.GeoDataFrame) -> list[str]:
+    """UFs presentes no agregado, na ordem de `config.SIGLAS_SUL`.
+
+    UF que apareça no dado e não esteja na constante NÃO é descartada: entra ao
+    fim, em ordem alfabética, para que o filtro do mapa continue cobrindo todo
+    o recorte mesmo que a configuração fique para trás.
+
+    Args:
+        agregado: saída de `carregar_agregado`.
+
+    Returns:
+        Ex.: ``["RS", "SC", "PR"]``.
+    """
+    presentes = {str(uf) for uf in agregado["uf"].dropna().unique()}
+    conhecidas = [uf for uf in config.SIGLAS_SUL if uf in presentes]
+    novas = sorted(presentes - set(config.SIGLAS_SUL))
+    if novas:
+        _LOGGER.warning(
+            "UF(s) fora de config.SIGLAS_SUL no agregado: %r. "
+            "Entraram ao fim do filtro de estado; atualize a constante.",
+            novas,
+        )
+    return conhecidas + novas
 
 
 def adicionar_legenda(mapa: folium.Map) -> None:
@@ -1237,6 +1546,14 @@ def adicionar_camadas_de_pontos(
                     fill=True,
                     fill_color=cor,
                     fill_opacity=0.92,
+                    # A UF viaja com o marcador porque é por ela que o filtro
+                    # de estado escolhe quem fica no mapa, no navegador. Vai em
+                    # `tags` — e não numa chave inventada — porque o folium
+                    # monta as opções do marcador com `path_options`, que só
+                    # repassa as chaves que conhece: qualquer outro nome seria
+                    # descartado em silêncio, e o filtro não teria por onde
+                    # separar os pontos.
+                    tags=[str(ponto["uf"])],
                     popup=folium.Popup(_popup_ponto(ponto), max_width=300),
                     tooltip=folium.Tooltip(_tooltip_ponto(ponto), sticky=True),
                 ).add_to(subgrupo)
@@ -1278,7 +1595,8 @@ def criar_mapa_base() -> folium.Map:
     """Cria o mapa Folium centrado no Sul, no zoom inicial da configuração.
 
     Returns:
-        O `folium.Map`, já com o CSS do painel e da legenda no ``<head>``.
+        O `folium.Map`, já com a camada base, os dois panes próprios e o CSS do
+        painel e da legenda no ``<head>``.
     """
     # `prefer_canvas` desenha os 7.600 marcadores num único canvas em vez de um
     # nó SVG por ponto. Sem cluster, todos existem no DOM ao mesmo tempo, e é
@@ -1286,10 +1604,27 @@ def criar_mapa_base() -> folium.Map:
     mapa = folium.Map(
         location=config.CENTRO_MAPA,
         zoom_start=config.ZOOM_INICIAL,
-        tiles=config.TILES_PADRAO,
+        tiles=None,
         control_scale=True,
         prefer_canvas=True,
     )
+
+    # A camada base é adicionada aqui, e não pelo `tiles=` do construtor, só
+    # para poder entrar com `control=False`: o `LayerControl` desenha uma
+    # seção de camadas-base mesmo quando existe UMA, e o resultado é um botão
+    # de rádio permanentemente marcado, com o alias interno do folium por
+    # rótulo ("cartodbpositron"), que não oferece escolha nenhuma. Sem camada
+    # base no painel, o Leaflet omite a seção e o separador dela.
+    folium.TileLayer(config.TILES_PADRAO, control=False).add_to(mapa)
+
+    # Os panes vêm antes de qualquer camada — ver `PANE_COROPLETICO`.
+    CustomPane(
+        PANE_COROPLETICO, z_index=Z_INDEX_COROPLETICO, pointer_events=True
+    ).add_to(mapa)
+    CustomPane(
+        PANE_DIVISAS_UF, z_index=Z_INDEX_DIVISAS_UF, pointer_events=False
+    ).add_to(mapa)
+
     mapa.get_root().header.add_child(Element(_CSS_PAINEL))
     return mapa
 
@@ -1314,32 +1649,11 @@ _JS_CONTROLADOR = """
        do painel. */
     var mapa = __MAPA__;
     var geo = __GEOJSON__;
+    var divisas = __DIVISAS__;
     var controle = __CONTROLE__;
     if (!mapa || !geo || !controle) {
         console.error("controlador: mapa, camada de municípios ou painel não encontrados");
         return;
-    }
-
-    /* O coroplético ganha um painel só dele para que o modo de visão possa
-       escondê-lo sem esconder os marcadores. Por padrão os dois desenhariam no
-       mesmo `overlayPane` — e, com `prefer_canvas`, no mesmo <canvas>, onde não
-       há como separar um do outro.
-
-       zIndex 350: acima dos ladrilhos (200) e abaixo dos marcadores (400/600),
-       que é a ordem de leitura — o polígono é fundo, o ponto é figura.
-
-       A troca de painel exige retirar e repor a camada, e isso acontece AQUI,
-       antes de o controlador guardar qualquer referência às caixas do painel
-       de camadas: retirar e repor faz o `L.Control.Layers` se reconstruir, e
-       referências guardadas antes disso apontariam para elementos descartados. */
-    var PANE_COROPLETICO = "coropletico";
-    if (!mapa.getPane(PANE_COROPLETICO)) {
-        mapa.createPane(PANE_COROPLETICO).style.zIndex = 350;
-    }
-    geo.eachLayer(function (camada) { camada.options.pane = PANE_COROPLETICO; });
-    if (mapa.hasLayer(geo)) {
-        mapa.removeLayer(geo);
-        mapa.addLayer(geo);
     }
 
     /* --- Estado da seleção, espelhando os dois níveis do painel --------- */
@@ -1347,17 +1661,28 @@ _JS_CONTROLADOR = """
     var grupoAtivo = {};
     var subAtivo = {};
     cfg.grupos.forEach(function (g) {
-        var camadaGrupo = window[g.camada];
-        if (camadaGrupo) {
-            meta.set(camadaGrupo, {tipo: "grupo", id: g.id});
-            grupoAtivo[g.id] = mapa.hasLayer(camadaGrupo);
+        g.obj = window[g.camada];
+        if (g.obj) {
+            meta.set(g.obj, {tipo: "grupo", id: g.id});
+            grupoAtivo[g.id] = mapa.hasLayer(g.obj);
         }
         g.subs.forEach(function (s) {
-            var camadaSub = window[s.camada];
-            if (camadaSub) {
-                meta.set(camadaSub, {tipo: "sub", id: s.rotulo});
-                subAtivo[s.rotulo] = mapa.hasLayer(camadaSub);
-            }
+            s.obj = window[s.camada];
+            if (!s.obj) { return; }
+            meta.set(s.obj, {tipo: "sub", id: s.rotulo});
+            subAtivo[s.rotulo] = mapa.hasLayer(s.obj);
+
+            /* Índice dos marcadores da bandeira por UF, montado uma vez na
+               carga: é ele que deixa o filtro de estado trocar o conteúdo do
+               subgrupo por um lote pronto, em vez de varrer os 7.600 pontos a
+               cada clique. A UF de cada marcador chega em `options.tags` — ver
+               `adicionar_camadas_de_pontos`. */
+            s.todos = s.obj.getLayers();
+            s.porUf = {};
+            s.todos.forEach(function (m) {
+                var uf = (m.options.tags || [])[0] || "";
+                (s.porUf[uf] = s.porUf[uf] || []).push(m);
+            });
         });
     });
 
@@ -1381,8 +1706,20 @@ _JS_CONTROLADOR = """
        marcado no painel continua valendo para as duas: no modo cidade a
        seleção de bandeiras colore o coroplético, no modo pontos ela decide
        quais marcadores aparecem. Por isso a lista de bandeiras não é
-       desabilitada em nenhum dos dois. */
+       desabilitada em nenhum dos três. */
     var modo = cfg.modoInicial;
+
+    /* UF em foco no filtro de estado; `null` significa as três. */
+    var ufSelecionada = null;
+
+    function mostraCidade() { return modo !== cfg.modoPontos; }
+    function mostraPontos() { return modo !== cfg.modoCidade; }
+
+    /* Serve tanto às propriedades de um município quanto a um item do índice
+       da busca: os dois carregam a sigla em `uf`. */
+    function dentroDoRecorte(comUf) {
+        return !ufSelecionada || comUf.uf === ufSelecionada;
+    }
 
     /* Trocar de modo NÃO adiciona nem remove camada nenhuma: o que muda é a
        visibilidade dos painéis (*panes*) do Leaflet em que elas desenham.
@@ -1402,37 +1739,51 @@ _JS_CONTROLADOR = """
        como sempre cuidou), e o modo diz qual das duas representações da mesma
        seleção está à vista. */
     function aplicarModo() {
-        var mostrarPontos = (modo === cfg.modoPontos);
+        var cidade = mostraCidade();
+        var pontos = mostraPontos();
 
         /* `visibility:hidden`, e não `display:none`, porque ele some com o
-           conteúdo SEM tirar o elemento do fluxo: o <canvas> em que o
-           coroplético é desenhado mantém posição e dimensão, e o Leaflet
+           conteúdo SEM tirar o elemento do fluxo: o <canvas> em que os
+           marcadores são desenhados mantém posição e dimensão, e o Leaflet
            continua redesenhando nele durante os zooms feitos no outro modo —
-           voltar para o modo cidade mostra o enquadramento atual, nunca uma
+           voltar ao modo de pontos mostra o enquadramento atual, nunca uma
            tela em branco esperando o próximo redesenho. (Conferido no
-           navegador: com o painel escondido, o canvas do coroplético seguiu
-           sendo repintado a cada mudança de enquadramento.)
-
-           E, como elemento invisível não recebe evento de mouse, o mesmo
-           ajuste impede que o tooltip de município apareça no modo de
-           pontos, onde não há município desenhado para explicar de onde ele
-           veio. */
+           navegador: com o painel escondido, o canvas seguiu sendo repintado a
+           cada mudança de enquadramento.) */
         var esconder = function (painel, oculto) {
             if (painel) { painel.style.visibility = oculto ? "hidden" : ""; }
         };
-        esconder(mapa.getPane(PANE_COROPLETICO), mostrarPontos);
-        esconder(mapa.getPane("overlayPane"), !mostrarPontos);
-        esconder(mapa.getPane("markerPane"), !mostrarPontos);
+        esconder(mapa.getPane("overlayPane"), !pontos);
+        esconder(mapa.getPane("markerPane"), !pontos);
+
+        /* O pane do coroplético NUNCA é escondido: no modo de pontos ele para
+           de pintar o preenchimento, mas continua desenhando a divisa de
+           município (ver `estilo`) — sem ela, um marcador no interior não diz
+           a que cidade pertence. O que sai junto com o preenchimento é a
+           interação: sem mancha de cor não há o que o clique explique, e um
+           polígono do tamanho de um município roubaria o clique dos marcadores
+           em cima dele. Duas travas para o mesmo — o pane deixa de receber
+           eventos de ponteiro, e cada feição fica não-interativa (`repintar`),
+           que é o que vale no renderizador de canvas. */
+        var painelCoro = mapa.getPane(cfg.paneCoropletico);
+        if (painelCoro) { painelCoro.style.pointerEvents = cidade ? "" : "none"; }
+        if (!cidade && geo.getPopup()) { mapa.closePopup(geo.getPopup()); }
 
         var legenda = document.getElementById("legenda-coropletico");
-        if (legenda) { legenda.style.display = mostrarPontos ? "none" : ""; }
+        if (legenda) { legenda.style.display = cidade ? "" : "none"; }
+
+        repintar();
     }
 
-    function montarSeletorDeModo() {
+    /* O painel é o dono das duas escolhas de escopo — o modo e o estado —,
+       então as duas caixas são inseridas na lista dele, antes das bandeiras. */
+    function listaDoPainel() {
         var painel = controle.getContainer && controle.getContainer();
-        if (!painel) { return; }
-        var lista = painel.querySelector(".leaflet-control-layers-list") || painel;
+        if (!painel) { return null; }
+        return painel.querySelector(".leaflet-control-layers-list") || painel;
+    }
 
+    function montarSeletorDeModo(lista) {
         var caixa = L.DomUtil.create("div", "modo-visao");
         var html = "";
         cfg.modos.forEach(function (m) {
@@ -1454,6 +1805,311 @@ _JS_CONTROLADOR = """
                 aplicarModo();
             });
         }
+    }
+
+    /* --------------------------------------------------------------------
+       Filtro por estado
+       --------------------------------------------------------------------
+
+       Marcar uma UF enquadra o mapa nela e APAGA as outras duas: polígono,
+       divisa e marcadores. Ver "Recorte por estado" no cabeçalho do módulo
+       para por que apagar, e não esmaecer. */
+
+    /* Troca o conteúdo de um subgrupo de bandeira EM LOTE.
+
+       O caminho natural — `subgrupo.removeLayer(m)` ponto a ponto — repassa
+       cada marcador ao MarkerCluster individualmente, e são até 5 mil por
+       troca: o agrupamento se reorganiza a cada um deles. Os métodos de lote
+       do cluster (`addLayers`/`removeLayers`) fazem a mesma coisa numa
+       passada, e é justamente o que o próprio Leaflet.FeatureGroup.SubGroup
+       usa quando o pai os oferece.
+
+       O preço é escrever direto em `_layers`, que é interno ao subgrupo. É
+       deliberado e necessário: o subgrupo precisa continuar sabendo quais
+       marcadores são dele para reinjetá-los no cluster quando a bandeira for
+       remarcada no painel. Escrever só no cluster deixaria os dois em
+       desacordo no primeiro clique seguinte.
+
+       A camada do subgrupo NÃO é adicionada nem removida do mapa aqui: fosse
+       assim, o `L.Control.Layers` se reconstruiria e as caixas de seleção do
+       painel voltariam ao estado que o mapa tem, desmarcando bandeiras. */
+    function definirConteudo(sub, marcadores) {
+        var pai = sub.getParentGroup && sub.getParentGroup();
+        var emLote = pai && pai.addLayers && pai.removeLayers;
+        var noMapa = !!sub._map;
+
+        if (noMapa && emLote) { pai.removeLayers(sub.getLayers()); }
+        var novos = {};
+        marcadores.forEach(function (m) { novos[sub.getLayerId(m)] = m; });
+        sub._layers = novos;
+        if (noMapa && emLote) { pai.addLayers(marcadores); }
+    }
+
+    function marcadoresDe(s) {
+        return ufSelecionada ? (s.porUf[ufSelecionada] || []) : s.todos;
+    }
+
+    function aplicarRecorteNosPontos() {
+        cfg.grupos.forEach(function (g) {
+            g.subs.forEach(function (s) {
+                if (s.obj) { definirConteudo(s.obj, marcadoresDe(s)); }
+            });
+        });
+    }
+
+    /* A contagem ao lado de cada bandeira passa a ser a do recorte: deixá-la
+       no total dos três estados faria o painel contradizer o mapa. */
+    function escreverContagem(camada, quantos) {
+        var input = inputDe(camada);
+        var rotulo = input && input.closest("label");
+        var alvo = rotulo && rotulo.querySelector(".camada-contagem");
+        if (alvo) { alvo.textContent = " (" + quantos.toLocaleString("pt-BR") + ")"; }
+    }
+
+    function atualizarContagens() {
+        cfg.grupos.forEach(function (g) {
+            var total = 0;
+            g.subs.forEach(function (s) {
+                var quantos = marcadoresDe(s).length;
+                total += quantos;
+                if (s.obj) { escreverContagem(s.obj, quantos); }
+            });
+            if (g.obj) { escreverContagem(g.obj, total); }
+        });
+    }
+
+    function enquadrar() {
+        var limites = ufSelecionada
+            ? cfg.limites[ufSelecionada]
+            : cfg.limites.todos;
+        if (limites) { mapa.fitBounds(limites, {padding: [14, 14]}); }
+    }
+
+    function selecionarUf(uf) {
+        ufSelecionada = uf || null;
+        aplicarRecorteNosPontos();
+        atualizarContagens();
+        recalcular();
+        atualizarBusca();
+        enquadrar();
+    }
+
+    function montarFiltroDeUf(lista) {
+        var caixa = L.DomUtil.create("div", "filtro-uf");
+        var opcao = function (valor, rotulo) {
+            return '<label><input type="radio" name="filtro-uf" value="' +
+                valor + '"' + (valor ? "" : " checked") + ">" + rotulo +
+                "</label>";
+        };
+        var html = '<span class="filtro-titulo">Estado</span>' +
+            opcao("", "Todos");
+        cfg.ufs.forEach(function (uf) { html += opcao(uf, uf); });
+        caixa.innerHTML = html;
+        lista.insertBefore(caixa, lista.firstChild);
+
+        L.DomEvent.disableClickPropagation(caixa);
+
+        var opcoes = caixa.querySelectorAll("input");
+        for (var i = 0; i < opcoes.length; i++) {
+            opcoes[i].addEventListener("change", function () {
+                selecionarUf(this.value);
+            });
+        }
+    }
+
+    /* --------------------------------------------------------------------
+       Busca de município
+       --------------------------------------------------------------------
+
+       O índice sai da própria camada de municípios já carregada: nome, UF e a
+       referência à feição, que é quem sabe os próprios limites. Nada de novo
+       é embarcado no HTML por causa da busca. */
+    var indice = [];
+    var sugestoes = [];
+    var campoBusca = null;
+    var listaBusca = null;
+    var destacada = -1;
+
+    /* Sem acento e sem caixa dos dois lados: é o que faz "sao lourenco" achar
+       "São Lourenço do Sul" — ninguém digita o acento numa caixa de busca. */
+    function normalizar(valor) {
+        return String(valor)
+            .normalize("NFD")
+            .replace(/[\u0300-\u036f]/g, "")
+            .toLowerCase()
+            .trim();
+    }
+
+    function montarIndice() {
+        geo.eachLayer(function (camada) {
+            var props = camada.feature.properties;
+            indice.push({
+                nome: String(props.municipio_nome),
+                uf: props.uf,
+                chave: normalizar(props.municipio_nome),
+                camada: camada
+            });
+        });
+        indice.sort(function (a, b) {
+            return a.chave < b.chave ? -1 : (a.chave > b.chave ? 1 : 0);
+        });
+    }
+
+    /* Prefixo antes de trecho no meio: quem digita "santa" quer "Santa Rosa"
+       na frente de "Bom Jesus de Santa..." . */
+    function candidatos(termo) {
+        var alvo = normalizar(termo);
+        if (alvo.length < cfg.minBusca) { return []; }
+
+        var comeca = [];
+        var contem = [];
+        for (var i = 0; i < indice.length; i++) {
+            var item = indice[i];
+            if (!dentroDoRecorte(item)) { continue; }
+            var posicao = item.chave.indexOf(alvo);
+            if (posicao === 0) { comeca.push(item); }
+            else if (posicao > 0) { contem.push(item); }
+            if (comeca.length >= cfg.maxSugestoes) { break; }
+        }
+        return comeca.concat(contem).slice(0, cfg.maxSugestoes);
+    }
+
+    function desenharSugestoes() {
+        if (!listaBusca) { return; }
+        destacada = -1;
+        listaBusca.innerHTML = "";
+
+        if (!sugestoes.length) {
+            /* Campo curto demais não é "não achei", é "ainda não procurei". */
+            if (normalizar(campoBusca.value).length >= cfg.minBusca) {
+                var vazio = L.DomUtil.create("li", "busca-vazio", listaBusca);
+                vazio.textContent = "nenhum município";
+                listaBusca.hidden = false;
+            } else {
+                listaBusca.hidden = true;
+            }
+            return;
+        }
+
+        sugestoes.forEach(function (item, i) {
+            var linha = L.DomUtil.create("li", "", listaBusca);
+            linha.setAttribute("data-i", String(i));
+            /* `textContent`, e não `innerHTML`: o nome vem do dado. */
+            linha.textContent = item.nome + " ";
+            var uf = L.DomUtil.create("span", "busca-uf", linha);
+            uf.textContent = item.uf;
+        });
+        listaBusca.hidden = false;
+    }
+
+    function atualizarBusca() {
+        if (!campoBusca) { return; }
+        sugestoes = candidatos(campoBusca.value);
+        desenharSugestoes();
+    }
+
+    function destacar(indiceAlvo) {
+        var linhas = listaBusca.querySelectorAll("li[data-i]");
+        if (!linhas.length) { return; }
+        destacada = (indiceAlvo + linhas.length) % linhas.length;
+        for (var i = 0; i < linhas.length; i++) {
+            linhas[i].classList.toggle("ativa", i === destacada);
+        }
+        linhas[destacada].scrollIntoView({block: "nearest"});
+    }
+
+    function fecharSugestoes() {
+        if (listaBusca) { listaBusca.hidden = true; }
+        destacada = -1;
+    }
+
+    /* O popup do município é do GRUPO — o folium o vincula ao GeoJson inteiro
+       e monta o conteúdo a partir de `_source`, a feição que o abriu, que
+       normalmente é definida pelo clique. Aqui não houve clique, então a
+       origem é dita à mão antes de abrir. */
+    function abrirPopupMunicipio(camada, centro) {
+        var popup = geo.getPopup();
+        if (!popup) { return; }
+        popup._source = camada;
+        geo.openPopup(centro);
+    }
+
+    function irPara(item) {
+        if (!item) { return; }
+        var limites = item.camada.getBounds();
+        mapa.fitBounds(limites, {maxZoom: cfg.zoomBusca, padding: [24, 24]});
+        /* O popup só faz sentido onde o polígono está pintado; no nível de
+           pontos ele abriria sobre um mapa sem coroplético nenhum. */
+        if (mostraCidade()) { abrirPopupMunicipio(item.camada, limites.getCenter()); }
+        campoBusca.value = item.nome;
+        fecharSugestoes();
+    }
+
+    function montarBusca() {
+        var Busca = L.Control.extend({
+            options: {position: "topleft"},
+            onAdd: function () {
+                var caixa = L.DomUtil.create("div", "busca-municipio");
+                campoBusca = L.DomUtil.create("input", "", caixa);
+                campoBusca.type = "text";
+                campoBusca.placeholder = cfg.textoBusca;
+                campoBusca.setAttribute("autocomplete", "off");
+                campoBusca.setAttribute("aria-label", cfg.textoBusca);
+
+                listaBusca = L.DomUtil.create("ul", "busca-sugestoes", caixa);
+                listaBusca.hidden = true;
+
+                /* Sem isto o campo devolve tudo ao mapa embaixo dele: o duplo
+                   clique dá zoom, arrastar move o mapa, e cada tecla chega aos
+                   atalhos do Leaflet — "+" e "-" dariam zoom no meio da
+                   palavra digitada. */
+                L.DomEvent.disableClickPropagation(caixa);
+                L.DomEvent.disableScrollPropagation(caixa);
+                L.DomEvent.on(
+                    campoBusca,
+                    "keydown keyup keypress",
+                    L.DomEvent.stopPropagation
+                );
+                return caixa;
+            }
+        });
+        mapa.addControl(new Busca());
+
+        campoBusca.addEventListener("input", atualizarBusca);
+        campoBusca.addEventListener("focus", atualizarBusca);
+        campoBusca.addEventListener("keydown", function (e) {
+            if (e.key === "ArrowDown") {
+                destacar(destacada + 1);
+                e.preventDefault();
+            } else if (e.key === "ArrowUp") {
+                destacar(destacada - 1);
+                e.preventDefault();
+            } else if (e.key === "Enter") {
+                /* Sem nenhuma destacada, Enter leva à primeira: é o resultado
+                   que o usuário está olhando. */
+                irPara(sugestoes[destacada < 0 ? 0 : destacada]);
+                e.preventDefault();
+            } else if (e.key === "Escape") {
+                fecharSugestoes();
+            }
+        });
+
+        listaBusca.addEventListener("click", function (e) {
+            var linha = e.target.closest("li[data-i]");
+            if (linha) { irPara(sugestoes[Number(linha.getAttribute("data-i"))]); }
+        });
+        listaBusca.addEventListener("mousemove", function (e) {
+            var linha = e.target.closest("li[data-i]");
+            if (linha) { destacar(Number(linha.getAttribute("data-i"))); }
+        });
+
+        /* Clique fora fecha a lista. Clique DENTRO da caixa não chega aqui —
+           `disableClickPropagation` o interrompe antes. */
+        document.addEventListener("click", function (e) {
+            if (campoBusca && !campoBusca.parentNode.contains(e.target)) {
+                fecharSugestoes();
+            }
+        });
     }
 
     var atual = {sel: [], cortes: [], cores: [], max: 0};
@@ -1531,13 +2187,48 @@ _JS_CONTROLADOR = """
         return atual.cores[i] || cfg.corZero;
     }
 
+    /* Município fora do recorte não é pintado de cinza: não é desenhado. Ver
+       "Recorte por estado" no cabeçalho do módulo. */
+    var ESTILO_OCULTO = {stroke: false, fill: false};
+
     function estilo(feature) {
+        if (!dentroDoRecorte(feature.properties)) { return ESTILO_OCULTO; }
+        var cidade = mostraCidade();
+        /* Todas as chaves em TODOS os caminhos: `setStyle` funde o objeto nas
+           opções da feição, então chave omitida aqui preserva o valor do
+           estilo anterior — sem o `stroke: true`, o município que voltasse ao
+           recorte continuaria com o traço desligado. */
         return {
+            stroke: true,
+            color: cfg.contorno.cor,
+            weight: cidade ? cfg.contorno.peso : cfg.contorno.pesoSemFundo,
+            fill: cidade,
             fillColor: corDe(feature.__total || 0),
-            color: "#8c98a4",
-            weight: 0.4,
-            fillOpacity: 0.78
+            fillOpacity: cfg.contorno.opacidadeFundo
         };
+    }
+
+    /* Repinta os polígonos e acerta quem responde ao mouse. */
+    function repintar() {
+        var cidade = mostraCidade();
+
+        /* Trocar `options.style` também, e não só repintar: o handler de
+           mouseout chama resetStyle, que relê options.style. Sem isto, tirar o
+           mouse de um município o devolveria à cor da seleção anterior. */
+        geo.options.style = estilo;
+        geo.setStyle(estilo);
+        geo.eachLayer(function (camada) {
+            camada.options.interactive =
+                cidade && dentroDoRecorte(camada.feature.properties);
+        });
+
+        if (divisas) {
+            divisas.setStyle(function (feature) {
+                return dentroDoRecorte(feature.properties)
+                    ? cfg.estiloDivisaUf
+                    : ESTILO_OCULTO;
+            });
+        }
     }
 
     function rotuloSelecao() {
@@ -1587,7 +2278,8 @@ _JS_CONTROLADOR = """
                 '<td class="n-municipios">' + n + " mun.</td></tr>";
         }
 
-        el.innerHTML = "<h4>" + rotuloSelecao() + "</h4>" +
+        el.innerHTML = "<h4>" + rotuloSelecao() +
+            (ufSelecionada ? " &middot; " + ufSelecionada : "") + "</h4>" +
             '<p class="legenda-sub">pontos de atendimento por município' +
             " &middot; " + soma.toLocaleString("pt-BR") + " no total</p>" +
             "<table>" + linhas + "</table>";
@@ -1601,6 +2293,9 @@ _JS_CONTROLADOR = """
         geo.eachLayer(function (camada) {
             var t = totalDe(camada.feature.properties);
             camada.feature.__total = t;
+            /* As classes e a legenda descrevem o que está NA TELA: município
+               fora do recorte não entra na escala nem na contagem. */
+            if (!dentroDoRecorte(camada.feature.properties)) { return; }
             if (t > atual.max) { atual.max = t; }
             valores.push(t);
         });
@@ -1611,12 +2306,7 @@ _JS_CONTROLADOR = """
             : cfg.rampaPadrao;
         atual.cores = amostrar(rampa, atual.cortes.length);
 
-        /* Trocar `options.style` também, e não só repintar: o handler de
-           mouseout chama resetStyle, que relê options.style. Sem isto, tirar o
-           mouse de um município o devolveria à cor da seleção anterior. */
-        geo.options.style = estilo;
-        geo.setStyle(estilo);
-
+        repintar();
         desenharLegenda(valores);
     }
 
@@ -1736,7 +2426,19 @@ _JS_CONTROLADOR = """
     });
 
     atualizarParciais();
-    montarSeletorDeModo();
+    atualizarContagens();
+
+    var lista = listaDoPainel();
+    if (lista) {
+        /* Cada um entra como PRIMEIRO filho da lista, então a ordem de chamada
+           é a inversa da que aparece na tela: o modo, chamado por último, fica
+           em cima do filtro de estado. */
+        montarFiltroDeUf(lista);
+        montarSeletorDeModo(lista);
+    }
+
+    montarIndice();
+    montarBusca();
     recalcular();
     aplicarModo();
 })();
@@ -1772,8 +2474,10 @@ class _ControladorReativo(MacroElement):
 def adicionar_controle_reativo(
     mapa: folium.Map,
     coropletico: folium.GeoJson,
+    divisas: folium.GeoJson,
     estrutura: list[dict],
     controle: folium.LayerControl,
+    agregado: gpd.GeoDataFrame,
 ) -> None:
     """Injeta o controlador do painel: cascata dos toggles e coroplético reativo.
 
@@ -1784,9 +2488,13 @@ def adicionar_controle_reativo(
     Args:
         mapa: mapa com todas as camadas já adicionadas.
         coropletico: camada devolvida por `adicionar_coropletico`.
+        divisas: camada devolvida por `adicionar_divisas_uf`, que o filtro de
+            estado apaga fora do recorte.
         estrutura: saída de `adicionar_camadas_de_pontos`.
         controle: `LayerControl` já adicionado — o controlador precisa dele
             para achar a caixa de seleção de cada camada e fazer a cascata.
+        agregado: saída de `carregar_agregado`, de onde saem as UFs do filtro e
+            os limites de enquadramento de cada uma.
     """
     grupos = [
         {
@@ -1825,13 +2533,37 @@ def adicionar_controle_reativo(
             for modo in MODOS_VISAO
         ],
         "modoInicial": MODO_INICIAL,
+        "modoCidade": MODO_CIDADE,
         "modoPontos": MODO_PONTOS,
+        "paneCoropletico": PANE_COROPLETICO,
+        # O estilo do município é decidido no cliente (ele muda com o modo e
+        # com o recorte), então as medidas vão junto em vez de ficarem
+        # duplicadas em JavaScript.
+        "contorno": {
+            "cor": COR_CONTORNO_MUNICIPIO,
+            "peso": LARGURA_CONTORNO_MUNICIPIO,
+            "pesoSemFundo": LARGURA_CONTORNO_MUNICIPIO_SEM_FUNDO,
+            "opacidadeFundo": OPACIDADE_COROPLETICO,
+        },
+        "estiloDivisaUf": {
+            "stroke": True,
+            "color": COR_DIVISA_UF,
+            "weight": LARGURA_DIVISA_UF,
+            "fill": False,
+        },
+        "ufs": ufs_do_recorte(agregado),
+        "limites": limites_por_uf(agregado),
+        "textoBusca": TEXTO_BUSCA,
+        "minBusca": MIN_CARACTERES_BUSCA,
+        "maxSugestoes": MAX_SUGESTOES_BUSCA,
+        "zoomBusca": ZOOM_BUSCA,
     }
 
     script = (
         _JS_CONTROLADOR.replace("__CONFIG__", json.dumps(configuracao, ensure_ascii=False))
         .replace("__MAPA__", mapa.get_name())
         .replace("__GEOJSON__", coropletico.get_name())
+        .replace("__DIVISAS__", divisas.get_name())
         .replace("__CONTROLE__", controle.get_name())
     )
     mapa.add_child(_ControladorReativo(script))
@@ -1876,7 +2608,8 @@ def gera_mapa(
     2. monta o mapa base centrado no Sul, no zoom de `config.ZOOM_INICIAL`;
     3. adiciona o coroplético por `total_cooperativas`, com popup e tooltip por
        município (nome, população — ou "dado indisponível" —, total de bancos,
-       total de pontos de cooperativas e o detalhamento por `sub_categoria`);
+       total de pontos de cooperativas e o detalhamento por `sub_categoria`),
+       e por cima dele a divisa entre estados, dissolvida da mesma malha;
     4. adiciona a legenda discreta do coroplético;
     5. lê os pontos já geocodificados por `src.cnefe` e monta as camadas em
        dois níveis (grupo pai por `categoria_if`, subgrupo por
@@ -1901,6 +2634,7 @@ def gera_mapa(
 
     com_textos = preparar_textos_municipio(agregado)
     coropletico = adicionar_coropletico(mapa, com_textos)
+    divisas = adicionar_divisas_uf(mapa, agregado)
     adicionar_legenda(mapa)
 
     estrutura = adicionar_camadas_de_pontos(mapa, localizados)
@@ -1909,7 +2643,9 @@ def gera_mapa(
     controle = adicionar_controle_de_camadas(mapa)
     # E o controlador por último de todos: ele referencia as variáveis das
     # camadas e do próprio painel, que precisam já estar declaradas no script.
-    adicionar_controle_reativo(mapa, coropletico, estrutura, controle)
+    adicionar_controle_reativo(
+        mapa, coropletico, divisas, estrutura, controle, agregado
+    )
 
     destino.parent.mkdir(parents=True, exist_ok=True)
     mapa.save(str(destino))
