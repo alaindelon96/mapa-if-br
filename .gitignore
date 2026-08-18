@@ -28,11 +28,20 @@ htmlcov/
 .mypy_cache/
 .ruff_cache/
 
-# Dados brutos e saídas geradas
+# Dados brutos (não versionados: as planilhas do BACEN são baixadas à mão e o
+# CNEFE tem 580 MB)
 # (padrão com /* em vez de /, para que a negação do .gitkeep funcione)
 data/raw/*
 !data/raw/.gitkeep
-output/*.html
+
+# O mapa NÃO entra aqui de propósito: ele é o artefato publicado no GitHub
+# Pages, e o site serve o arquivo versionado. O custo é conhecido e foi medido:
+# o folium sorteia os identificadores dos elementos a cada execução, então duas
+# gerações do MESMO dado diferem em ~106 mil trechos e o git não consegue
+# guardar só o delta — cada versão commitada soma ~1,1 MB permanentes ao
+# histórico. Em ritmo de safra do BACEN isso é irrelevante; se algum dia o mapa
+# passar a ser regerado com frequência, migrar para uma branch gh-pages órfã
+# resolve sem reescrever o histórico da main.
 
 # Jupyter
 .ipynb_checkpoints/
