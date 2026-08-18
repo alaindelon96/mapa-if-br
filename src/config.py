@@ -78,6 +78,33 @@ VARIAVEL_IBGE_POPULACAO = "9324"
 TIMEOUT_IBGE = 180
 
 # --------------------------------------------------------------------------- #
+# CNEFE — Cadastro Nacional de Endereços para Fins Estatísticos (Censo 2022)
+# --------------------------------------------------------------------------- #
+
+#: Diretório dos arquivos por UF do CNEFE em CSV, no FTP do IBGE.
+#:
+#: O CNEFE é a fonte de coordenadas dos pontos de atendimento (ver `src.cnefe`).
+#: Cada endereço do país aparece nele com CEP, logradouro, número e LAT/LON
+#: medidos no Censo 2022 — é o que permite geocodificar o endereço publicado
+#: pelo BACEN sem depender de serviço externo com limite de requisições.
+URL_IBGE_CNEFE = (
+    "https://ftp.ibge.gov.br/Cadastro_Nacional_de_Enderecos_para_Fins_"
+    "Estatisticos/Censo_Demografico_2022/Arquivos_CNEFE/CSV/UF"
+)
+
+#: Onde os ZIP do CNEFE ficam em cache. São ~580 MB para os três estados do
+#: Sul, baixados uma única vez; `data/raw/` inteiro está no .gitignore.
+DIR_CNEFE = RAW_DIR / "cnefe"
+
+#: Timeout (segundos) do download de um ZIP do CNEFE. Os arquivos vão de 113 MB
+#: (SC) a 236 MB (RS), e a ~2,4 MB/s medidos o maior leva ~100 s — o valor
+#: abaixo cobre uma conexão bem mais lenta antes de desistir.
+TIMEOUT_CNEFE = 1800
+
+#: Destino dos pontos de atendimento já com coordenada e nível de precisão.
+ARQUIVO_PONTOS_GEOCODIFICADOS = PROCESSED_DIR / "pontos_geocodificados.parquet"
+
+# --------------------------------------------------------------------------- #
 # Malha territorial e agregação por município
 # --------------------------------------------------------------------------- #
 

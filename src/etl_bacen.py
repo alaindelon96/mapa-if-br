@@ -33,6 +33,9 @@ COLUNAS_ESQUEMA_COMUM = [
     "segmento",
     "nome_instalacao",
     "endereco",
+    "numero",
+    "bairro",
+    "cep",
     "municipio",
     "uf",
     "municipio_ibge",
@@ -50,9 +53,34 @@ COLUNAS_TEXTO = [
     "segmento",
     "nome_instalacao",
     "endereco",
+    "numero",
+    "bairro",
+    "cep",
     "municipio",
     "uf",
 ]
+
+#: Colunas do endereço que existem nas duas planilhas e são carregadas para o
+#: dataset final com um único propósito: alimentar a geocodificação de
+#: `src.cnefe`.
+#:
+#: `endereco` sozinho não basta para localizar o ponto. A fonte publica o
+#: logradouro abreviado e sem separador ("PCA.TIRADENTES,410"), e o que salva o
+#: casamento com o CNEFE do IBGE são os três campos ao lado:
+#:
+#: * `cep` — preenchido em 100% das linhas da safra 202606, e a chave mais
+#:   confiável que existe aqui porque não depende de casar texto. Atenção: em
+#:   ~58% das linhas é o CEP geral do município (terminado em ``-000``), que
+#:   não identifica logradouro — `src.cnefe` trata os dois casos em níveis de
+#:   precisão diferentes;
+#: * `numero` — o número do imóvel; vem em coluna própria em 89% dos postos,
+#:   mas em só 34% das agências, onde costuma estar embutido no `endereco`
+#:   depois da vírgula. A extração de um a partir do outro é feita na
+#:   geocodificação, não aqui, para que este módulo continue publicando o que a
+#:   fonte publica;
+#: * `bairro` — 98% preenchido; não entra no casamento hoje, e é carregado por
+#:   ser o desempate óbvio caso uma safra futura precise dele.
+COLUNAS_ENDERECO_BACEN = ["endereco", "numero", "bairro", "cep"]
 
 # Rótulos de `tipo_instalacao`, definidos pela planilha de origem.
 TIPO_AGENCIA = "Agência"
@@ -80,6 +108,9 @@ MAPA_COLUNAS_AGENCIAS = {
     "segmento": ["SEGMENTO"],
     "nome_instalacao": ["NOME AGÊNCIA"],
     "endereco": ["ENDEREÇO"],
+    "numero": ["NÚMERO", "NUMERO"],
+    "bairro": ["BAIRRO"],
+    "cep": ["CEP"],
     "municipio": ["MUNICÍPIO", "MUNICIPIO"],
     "uf": ["UF"],
     "municipio_ibge": ["MUNICIPIO IBGE", "MUNICÍPIO IBGE"],
@@ -91,6 +122,9 @@ MAPA_COLUNAS_POSTOS = {
     "segmento": ["SEGMENTO"],
     "nome_instalacao": ["NOME INSTALAÇÃO"],
     "endereco": ["ENDEREÇO"],
+    "numero": ["NÚMERO", "NUMERO"],
+    "bairro": ["BAIRRO"],
+    "cep": ["CEP"],
     "municipio": ["MUNICIPIO", "MUNICÍPIO"],
     "uf": ["UF"],
     "municipio_ibge": ["MUNICIPIO IBGE", "MUNICÍPIO IBGE"],

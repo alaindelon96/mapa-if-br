@@ -9,11 +9,14 @@ do RESULTADO:
   padrão de 7 dígitos;
 * `agregado_municipio.parquet` — foi gravado depois do dataset que o originou, a
   agregação não perdeu nenhum ponto no join com a malha, e não há município
-  repetido.
+  repetido;
+* `pontos_geocodificados.parquet` — todo ponto tem coordenada, ela cai dentro
+  do retângulo do Sul, e o nível de precisão declarado é um dos previstos.
 
-Os arquivos são pré-requisito: rode ``python -m src.etl_bacen`` e
-``python -m src.agregacao`` antes. Sem eles os testes falham com a instrução,
-em vez de passarem silenciosamente sobre um dataset inexistente.
+Os arquivos são pré-requisito: rode ``python -m src.etl_bacen``,
+``python -m src.agregacao`` e ``python -m src.cnefe`` antes. Sem eles os testes
+falham com a instrução, em vez de passarem silenciosamente sobre um dataset
+inexistente.
 """
 
 import re
@@ -22,7 +25,7 @@ from datetime import datetime
 import pandas as pd
 import pytest
 
-from src import config
+from src import cnefe, config
 from src.etl_bacen import (
     CATEGORIA_BANCO,
     CATEGORIA_COOPERATIVA,
@@ -267,6 +270,92 @@ def test_nao_ha_municipio_duplicado_no_agregado(agregado):
     assert len(duplicados) == 0, (
         f"{duplicados.nunique()} código(s) de município repetido(s) no agregado. "
         f"Exemplos: {sorted(duplicados.unique())[:5]!r}"
+    )
+
+
+# --------------------------------------------------------------------------- #
+# 6. Geocodificação dos pontos (src.cnefe)
+# --------------------------------------------------------------------------- #
+
+#: Retângulo que contém os três estados do Sul, com folga de ~0,5°, medido
+#: sobre a malha do IBGE (lon -57,65..-48,02 / lat -33,75..-22,52).
+#:
+#: Serve para pegar a classe de erro que passaria despercebida: coordenada
+#: trocada de sinal, latitude e longitude invertidas, ou casamento com um
+#: endereço de outra região do país. O teste é grosseiro de propósito — a
+#: conferência fina, contra o polígono do município de cada ponto, é feita na
+#: própria geocodificação por `cnefe.conferir_dentro_do_municipio`.
+CAIXA_SUL = {"lon_min": -58.2, "lon_max": -47.5, "lat_min": -34.3, "lat_max": -22.0}
+
+
+@pytest.fixture(scope="module")
+def geocodificados() -> pd.DataFrame:
+    """Pontos de atendimento com coordenada e nível de precisão."""
+    _exigir_arquivo(config.ARQUIVO_PONTOS_GEOCODIFICADOS, "python -m src.cnefe")
+    return pd.read_parquet(config.ARQUIVO_PONTOS_GEOCODIFICADOS)
+
+
+def test_todo_ponto_geocodificado_tem_coordenada(geocodificados, pontos):
+    """Nenhum ponto fica sem posição, e nenhum ponto se perde no caminho.
+
+    O fallback de município garante coordenada para 100% das linhas; a única
+    perda admitida é a de código IBGE inexistente na malha, que o próprio
+    `src.cnefe` registra no log.
+    """
+    nulos = int(geocodificados[["latitude", "longitude"]].isna().any(axis=1).sum())
+    assert nulos == 0, f"{nulos} ponto(s) sem coordenada no arquivo geocodificado."
+
+    assert len(geocodificados) <= len(pontos), (
+        f"A geocodificação devolveu {len(geocodificados)} linhas para "
+        f"{len(pontos)} pontos do dataset — ela não deveria criar linhas."
+    )
+
+
+def test_coordenadas_caem_dentro_do_sul(geocodificados):
+    """Toda coordenada está no retângulo que contém RS, SC e PR."""
+    fora = geocodificados[
+        (geocodificados["longitude"] < CAIXA_SUL["lon_min"])
+        | (geocodificados["longitude"] > CAIXA_SUL["lon_max"])
+        | (geocodificados["latitude"] < CAIXA_SUL["lat_min"])
+        | (geocodificados["latitude"] > CAIXA_SUL["lat_max"])
+    ]
+    assert len(fora) == 0, (
+        f"{len(fora)} ponto(s) fora do retângulo do Sul. Exemplos: "
+        f"{fora[['municipio', 'uf', 'latitude', 'longitude']].head().to_dict('records')!r}"
+    )
+
+
+def test_precisao_declarada_e_um_dos_niveis_previstos(geocodificados):
+    """`precisao` só admite os quatro níveis de `cnefe.ORDEM_PRECISAO`.
+
+    O popup do mapa lê essa coluna para descrever ao leitor o que a posição do
+    marcador significa; um valor fora da tabela viraria texto solto na tela.
+    """
+    encontrados = set(geocodificados["precisao"].dropna().unique())
+    previstos = set(cnefe.ORDEM_PRECISAO)
+    assert encontrados <= previstos, (
+        f"Nível de precisão desconhecido: {sorted(encontrados - previstos)!r}. "
+        f"Previstos: {sorted(previstos)!r}."
+    )
+
+
+def test_geocodificado_nao_e_mais_antigo_que_o_dataset():
+    """O arquivo geocodificado tem de ser posterior ao dataset que o originou.
+
+    Mesma razão de `test_agregado_nao_e_mais_antigo_que_o_dataset`: rodar o ETL
+    e esquecer `src.cnefe` deixaria o mapa desenhando os pontos da safra
+    anterior.
+    """
+    _exigir_arquivo(config.ARQUIVO_IF_SUL_CATEGORIZADO, "python -m src.etl_bacen")
+    _exigir_arquivo(config.ARQUIVO_PONTOS_GEOCODIFICADOS, "python -m src.cnefe")
+
+    mtime_pontos = config.ARQUIVO_IF_SUL_CATEGORIZADO.stat().st_mtime
+    mtime_geo = config.ARQUIVO_PONTOS_GEOCODIFICADOS.stat().st_mtime
+    assert mtime_geo >= mtime_pontos, (
+        f"{config.ARQUIVO_PONTOS_GEOCODIFICADOS.name} está DESATUALIZADO em "
+        f"{mtime_pontos - mtime_geo:.0f}s em relação a "
+        f"{config.ARQUIVO_IF_SUL_CATEGORIZADO.name}. "
+        "Rode `python -m src.cnefe` para regerá-lo."
     )
 
 

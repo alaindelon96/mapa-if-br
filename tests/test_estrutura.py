@@ -1,13 +1,44 @@
 """Testes de fumaça: garantem que o esqueleto carrega e que os caminhos batem."""
 
 import pandas as pd
+import pytest
 
-from src import config, export, geo, ingest, mapping, normalize, pipeline
+from src import cnefe, config, export, geo, ingest, mapping, normalize, pipeline
 
 
 def test_modulos_importam():
     for modulo in (config, ingest, normalize, geo, mapping, export, pipeline):
         assert modulo is not None
+
+
+@pytest.mark.parametrize(
+    ("bacen", "cnefe_fonte"),
+    [
+        # O caso que justifica a tabela de abreviaturas: o BACEN abrevia a
+        # patente dentro do nome, o CNEFE publica o título por extenso.
+        ("R.GAL.SAMPAIO", "RUA GENERAL SAMPAIO"),
+        ("R CONS. LAURINDO", "RUA CONSELHEIRO LAURINDO"),
+        ("PCA.QUINZE DE NOVEMBRO", "PRAÇA QUINZE DE NOVEMBRO"),
+        # Romano de um lado, extenso do outro.
+        ("AV XV DE NOVEMBRO", "AVENIDA QUINZE DE NOVEMBRO"),
+        # Artigo presente em um lado só.
+        ("AVENIDA DA VINDIMA", "AVENIDA VINDIMA"),
+        # Tipo de logradouro divergente entre as fontes: sai da chave, então
+        # não impede o casamento.
+        ("RUA GETULIO VARGAS", "AVENIDA GETÚLIO VARGAS"),
+    ],
+)
+def test_chave_logradouro_reconcilia_as_duas_fontes(bacen, cnefe_fonte):
+    """As duas grafias do mesmo logradouro têm de gerar a mesma chave."""
+    assert cnefe.chave_logradouro(bacen) == cnefe.chave_logradouro(cnefe_fonte)
+
+
+def test_chave_logradouro_nao_confunde_logradouros_distintos():
+    """A normalização não pode ser tão agressiva a ponto de colidir nomes."""
+    assert cnefe.chave_logradouro("RUA SAO PEDRO") != cnefe.chave_logradouro(
+        "RUA SAO PAULO"
+    )
+    assert cnefe.chave_logradouro("") == ""
 
 
 def test_caminhos_apontam_para_o_projeto():
