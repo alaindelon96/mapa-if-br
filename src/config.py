@@ -153,6 +153,13 @@ TILES_PADRAO = "CartoDB positron"
 #: Destino do mapa interativo gerado por `src.mapa`.
 ARQUIVO_MAPA = OUTPUT_DIR / "mapa_if_sul.html"
 
+#: Cache das bibliotecas JS/CSS que o folium referencia por CDN.
+#:
+#: Elas são embutidas no HTML por `src.embutir` para que o mapa funcione em
+#: rede que bloqueie CDN e também sem internet nenhuma. São ~700 KB em 14
+#: arquivos de versão fixa (a versão está na própria URL), baixados uma vez.
+DIR_LIBS = RAW_DIR / "libs"
+
 # --------------------------------------------------------------------------- #
 # Recorte de instituições
 # --------------------------------------------------------------------------- #

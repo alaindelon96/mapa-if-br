@@ -26,7 +26,16 @@ há nenhum dos dois. Por isso a malha usada é a completa — os municípios sem
 nenhum ponto de atendimento aparecem no mapa como zero, e não como buraco.
 
 O resultado é `output/mapa_if_sul.html`, que abre direto no navegador, sem
-servidor: folha de estilo, símbolo e ícone vão embutidos no arquivo.
+servidor e **sem internet**: folha de estilo, símbolo, ícone e as bibliotecas
+JavaScript (Leaflet, MarkerCluster e o resto do que o folium carregaria por
+CDN) vão todos embutidos no arquivo — ver `src/embutir.py`. Ele circula por
+e-mail ou pen drive e funciona em rede corporativa que bloqueie CDN.
+
+A única coisa que continua vindo da rede é o **basemap** — os ladrilhos de
+ruas da CARTO, baixados sob demanda conforme o enquadramento, que por serem
+milhares não têm como ser empacotados. Sem eles o mapa perde o fundo de ruas
+e mantém todo o resto: coroplético, divisas, os 7.600 marcadores, popups,
+filtros, busca e ranking.
 
 ## 2. Escopo
 
@@ -209,6 +218,12 @@ durante o desenvolvimento.
 | 3 | `src.agregacao` | junta os dois pelo código IBGE, uma linha por município | `data/processed/agregado_municipio.parquet` |
 | 4 | `src.cnefe` | resolve a coordenada de cada ponto contra o CNEFE do Censo 2022 | `data/processed/pontos_geocodificados.parquet` |
 | 5 | `src.mapa` | coroplético reativo, camadas de ponto e a moldura de página | `output/mapa_if_sul.html` |
+
+A etapa 5 termina chamando `src.embutir`, que troca as tags de CDN escritas
+pelo folium pelo conteúdo dos arquivos. São ~700 KB em 14 bibliotecas,
+baixadas uma vez para `data/raw/libs/` e reaproveitadas — o mesmo esquema de
+cache da malha e do CNEFE. No arquivo comprimido que o navegador baixa isso
+custa ~50 KB (2,06 -> 2,11 MB).
 
 ### Testes
 

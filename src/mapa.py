@@ -280,7 +280,7 @@ from folium.map import CustomPane
 from folium.plugins import FeatureGroupSubGroup, MarkerCluster
 from jinja2 import Template
 
-from src import agregacao, cnefe, config
+from src import agregacao, cnefe, config, embutir
 from src.etl_bacen import CATEGORIA_BANCO, CATEGORIA_COOPERATIVA
 
 _LOGGER = logging.getLogger(__name__)
@@ -3900,7 +3900,13 @@ def gera_mapa(
     destino.parent.mkdir(parents=True, exist_ok=True)
     mapa.save(str(destino))
 
-    imprimir_resumo(agregado, localizados, estrutura, destino)
+    # Depois de gravar, e não antes: o folium só escreve as tags de CDN na
+    # renderização final, então não há o que substituir enquanto o mapa é um
+    # objeto em memória. Ver `src.embutir` para o porquê de o HTML precisar
+    # carregar as bibliotecas dentro de si.
+    embutido = embutir.embutir_no_html(destino)
+
+    imprimir_resumo(agregado, localizados, estrutura, destino, embutido)
     return destino
 
 
@@ -3909,6 +3915,7 @@ def imprimir_resumo(
     localizados: pd.DataFrame,
     estrutura: list[dict],
     destino: Path,
+    embutido: dict[str, int] | None = None,
 ) -> None:
     """Imprime o que foi renderizado, para conferência manual.
 
@@ -3958,6 +3965,24 @@ def imprimir_resumo(
                 f"marcador {cor}"
             )
     print()
+
+    if embutido is not None:
+        restantes = embutir.restantes_externos(destino)
+        print("-- autonomia do arquivo --")
+        print(
+            f"   {embutido['scripts']} script(s) e {embutido['estilos']} folha(s) "
+            f"de estilo embutidos (+{embutido['bytes'] / 1024:.0f} KB)"
+        )
+        if restantes:
+            print(f"   ATENÇÃO: {len(restantes)} biblioteca(s) ainda vêm de CDN:")
+            for url in restantes:
+                print(f"      - {url}")
+        else:
+            print("   nenhuma biblioteca externa restante — o mapa abre sem rede")
+        print(
+            "   (o basemap continua vindo da CARTO: sem rede, some o "
+            "fundo de ruas)\n"
+        )
 
     tamanho_mb = destino.stat().st_size / 1024 / 1024
     print(f"Gravado em: {destino}  ({tamanho_mb:.1f} MB)")
