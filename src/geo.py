@@ -23,8 +23,20 @@ def para_geodataframe(
 def reprojetar(gdf: gpd.GeoDataFrame, crs: str) -> gpd.GeoDataFrame:
     """Reprojeta o GeoDataFrame para o CRS informado.
 
-    Use `config.CRS_METRICO` antes de medir distâncias ou áreas, e
-    `config.CRS_GEOGRAFICO` antes de plotar no folium.
+    Volte a `config.CRS_GEOGRAFICO` antes de plotar no folium: o Leaflet só
+    entende lat/lon em graus.
+
+    Para medir distância ou área, passe um CRS MÉTRICO explícito. O projeto não
+    define constante para ele porque nenhuma etapa mede geometria — a agregação
+    junta os pontos à malha pelo código IBGE do município, não espacialmente
+    (ver o cabeçalho de `src.agregacao`).
+
+    Args:
+        gdf: as feições a reprojetar.
+        crs: o CRS de destino, ex.: ``"EPSG:4326"``.
+
+    Returns:
+        Uma cópia reprojetada.
     """
     return gdf.to_crs(crs)
 

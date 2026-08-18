@@ -120,3 +120,30 @@ def test_para_geodataframe_cria_pontos_no_crs_geografico():
 
 def test_criar_mapa_retorna_mapa_folium():
     assert mapping.criar_mapa()._name == "Map"
+def test_export_grava_e_cria_o_diretorio(tmp_path, monkeypatch):
+    """As duas funções de `export` gravam de fato, criando o diretório que falta.
+
+    Existe porque a versão anterior chamava `config.garantir_diretorios()`, que
+    nunca existiu: as duas funções levantavam `AttributeError` na primeira
+    linha. O `test_modulos_importam` não pegava — importar o módulo não executa
+    o corpo das funções —, e nenhuma etapa do pipeline as usa, então o defeito
+    ficou invisível. Aqui elas são CHAMADAS, contra um destino temporário.
+    """
+    monkeypatch.setattr(config, "PROCESSED_DIR", tmp_path / "processed")
+    monkeypatch.setattr(config, "OUTPUT_DIR", tmp_path / "output")
+
+    df = pd.DataFrame({"municipio_ibge": ["4314902"], "total_geral": [298]})
+
+    # Nenhum dos dois diretórios existe ainda: criá-los é parte do contrato.
+    csv = export.salvar_processado(df, "teste.csv")
+    assert csv.exists()
+    assert pd.read_csv(csv, dtype=str)["municipio_ibge"].tolist() == ["4314902"]
+
+    # A extensão decide o formato, e o Parquet preserva o dtype.
+    parquet = export.salvar_processado(df, "teste.parquet")
+    assert parquet.exists()
+    assert pd.read_parquet(parquet)["total_geral"].tolist() == [298]
+
+    html = export.salvar_mapa(mapping.criar_mapa(), "teste.html")
+    assert html.exists()
+    assert html.read_text(encoding="utf-8").lstrip().startswith("<!DOCTYPE html>")
