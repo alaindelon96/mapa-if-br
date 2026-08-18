@@ -13,11 +13,44 @@ do mesmo recorte:
 O coroplético é **reativo**: ele mostra sempre o total das bandeiras marcadas no
 painel de camadas, e se repinta a cada clique. Ver "Coroplético reativo" abaixo.
 
+As duas leituras não são entregues soltas numa tela cheia de mapa: elas vão
+dentro de uma **moldura de página** — marca, título, quatro indicadores, barra
+de controles, cartão do mapa e coluna de bandeiras e de ranking. Ver "Moldura
+da página" abaixo e `adicionar_moldura`.
+
 Saída: ``output/mapa_if_sul.html`` (ver `config.ARQUIVO_MAPA`).
 
 Uso (a partir da raiz do projeto, com o venv ativo)::
 
     python -m src.mapa
+
+--------------------------------------------------------------------------
+Moldura da página
+--------------------------------------------------------------------------
+
+O arquivo gerado é lido por quem decide onde abrir, fechar ou reforçar ponto de
+atendimento — não por quem sabe operar um mapa. A moldura existe para responder,
+sem clique nenhum, as três perguntas que essa leitura faz antes de qualquer
+outra: de quando é o dado, quanto existe e onde falta.
+
+* a **faixa de marca** traz o símbolo do cooperativismo e o selo da safra
+  (`config.DATA_DADOS`), porque a data do dado é a primeira coisa perguntada
+  sobre um mapa recebido pronto;
+* os **quatro indicadores** respondem à mesma seleção que colore o mapa, e são
+  reescritos a cada clique: pontos de atendimento, municípios atendidos,
+  municípios SEM atendimento e a população que mora neles. Os dois últimos são
+  o motivo de a faixa existir — o coroplético mostra onde a rede está, e os
+  indicadores dizem o tamanho do que ela deixa de fora;
+* a **barra de controles** reúne as duas escolhas de escopo (o modo de visão e
+  o estado) e a busca de município, tudo numa linha só, acima do mapa;
+* a **coluna lateral** tem as bandeiras (o painel de camadas do Leaflet,
+  encaixado ali) e o ranking dos municípios de maior presença, que responde
+  "onde a rede se concentra" — pergunta que um coroplético não responde, porque
+  as manchas escuras caem nas capitais, que o leitor já conhece.
+
+O mapa e o painel de camadas nascem soltos e são MOVIDOS para dentro dos
+cartões pelo controlador, na carga da página; `adicionar_moldura` explica por
+que o HTML não pode já nascer montado.
 
 --------------------------------------------------------------------------
 Por que as camadas de ponto são hierárquicas (e não uma lista plana)
@@ -68,10 +101,11 @@ nível de precisão que o ponto declara.
 Modo de visão: município, ponto de atendimento, ou os dois
 --------------------------------------------------------------------------
 
-O topo do painel traz um seletor com as três leituras do mesmo recorte
-(`MODOS_VISAO`): **nível cidade**, com os municípios pintados; **nível pontos
-de atendimento**, com os marcadores; e **cidade + pontos**, com as duas
-sobrepostas. O mapa abre em `MODO_INICIAL`.
+A barra de controles abre com um seletor das três leituras do mesmo recorte
+(`MODOS_VISAO`): **municípios**, com os polígonos pintados; **pontos**, com os
+marcadores; e **ambos**, com as duas sobrepostas. O mapa abre em
+`MODO_INICIAL`. Ao lado dos botões fica a explicação do modo escolhido, trocada
+junto com ele.
 
 O que o modo NÃO faz é mexer na seleção de bandeiras. As leituras são da mesma
 seleção, com efeitos diferentes: no nível cidade as bandeiras marcadas decidem
@@ -98,14 +132,15 @@ mesmo ``overlayPane`` e, com `prefer_canvas`, no mesmo ``<canvas>``.
 Recorte por estado
 --------------------------------------------------------------------------
 
-Abaixo do modo de visão, o painel traz o filtro de UF: com um estado marcado, o
+Ao lado do modo de visão, a barra traz o filtro de UF: com um estado marcado, o
 mapa se enquadra nele (`fitBounds` nos limites daquela UF) e os outros dois
 SOMEM inteiros — polígono, divisa estadual e marcadores. Não é só um zoom.
 
 Sumir é mais forte do que esmaecer, e é o ponto: a escala de cores, a legenda,
-os totais do painel e a busca passam a falar só do estado escolhido. Um estado
-vizinho deixado à mostra continuaria disputando a leitura das classes, que são
-recalculadas sobre o recorte visível.
+os quatro indicadores, o ranking, as contagens do painel e a busca passam a
+falar só do estado escolhido. Um estado vizinho deixado à mostra continuaria
+disputando a leitura das classes, que são recalculadas sobre o recorte
+visível.
 
 Nos marcadores o recorte é feito trocando o conteúdo de cada subgrupo em lote
 (`addLayers`/`removeLayers` do MarkerCluster), e não escondendo ponto a ponto:
@@ -127,11 +162,11 @@ coroplético e abaixo dos pontos, sem receber eventos de mouse.
 Busca de município
 --------------------------------------------------------------------------
 
-O canto superior esquerdo traz um campo de busca com sugestões. O casamento é
-por texto normalizado (sem acento e sem caixa), então "sao lourenco" acha
-"São Lourenço do Sul"; prefixo vem antes de trecho no meio do nome. Escolher um
-resultado enquadra o município e, nos modos em que o polígono está pintado,
-abre o popup dele.
+A ponta direita da barra de controles traz um campo de busca com sugestões. O
+casamento é por texto normalizado (sem acento e sem caixa), então "sao lourenco"
+acha "São Lourenço do Sul"; prefixo vem antes de trecho no meio do nome.
+Escolher um resultado enquadra o município e, nos modos em que o polígono está
+pintado, abre o popup dele — o mesmo caminho que uma linha do ranking usa.
 
 A lista sai da própria camada de municípios já carregada no navegador — nenhum
 índice extra é embarcado no HTML — e respeita o filtro de UF: com um estado
@@ -212,8 +247,21 @@ aqui porque a legenda é reescrita junto, na mesma ação e na mesma tela — ao
 contrário da comparação entre safras, em que o leitor não vê as duas legendas.
 
 Com UMA única bandeira marcada, a paleta troca para uma rampa na cor da marca
-(ver `CORES_BANDEIRA`); com duas ou mais, volta para YlGnBu, porque não existe
-"cor da marca" de um conjunto.
+(ver `CORES_BANDEIRA`); com duas ou mais, volta para a rampa da identidade,
+porque não existe "cor da marca" de um conjunto.
+
+--------------------------------------------------------------------------
+Identidade visual
+--------------------------------------------------------------------------
+
+A página inteira é Helvetica, em turquesa e azul-petróleo (ver "Identidade
+visual" nas constantes). As duas cores têm papéis fixos: o petróleo é o texto
+de peso e as superfícies escuras, a turquesa é o destaque e o que está ligado.
+
+O que NÃO segue a identidade são as cores de marca dos marcadores
+(`CORES_BANDEIRA`) e a rampa de bandeira única: ali a cor é dado, não
+decoração — repintar o marcador da Caixa de turquesa desfaria justamente a
+leitura que a cor por bandeira existe para permitir.
 """
 
 from __future__ import annotations
@@ -238,6 +286,111 @@ from src.etl_bacen import CATEGORIA_BANCO, CATEGORIA_COOPERATIVA
 _LOGGER = logging.getLogger(__name__)
 
 # --------------------------------------------------------------------------- #
+# Identidade visual
+# --------------------------------------------------------------------------- #
+
+#: Pilha de fontes de TODA a página — moldura, painel, popup e legenda.
+#:
+#: Helvetica é a fonte pedida; as duas seguintes são o que a substitui onde ela
+#: não está instalada — "Helvetica Neue" no macOS e Arial no Windows. As três
+#: têm a mesma métrica, então nenhuma medida do layout muda conforme a máquina
+#: que abre o arquivo, que é o requisito de um HTML distribuído por e-mail.
+FONTE_PADRAO = 'Helvetica, "Helvetica Neue", Arial, sans-serif'
+
+#: Turquesa e azul-petróleo, as duas cores da identidade.
+#:
+#: A dupla é usada em papéis fixos, e não alternada por gosto: o PETRÓLEO é a
+#: cor do texto de peso e das superfícies escuras (cabeçalho, títulos, divisa
+#: estadual), a TURQUESA é a cor de ação e de destaque (opção marcada, valor de
+#: indicador, foco do teclado). Manter os dois papéis separados é o que faz o
+#: leitor aprender, em dois segundos, que turquesa = "está ligado".
+COR_TURQUESA = "#14b8a6"
+COR_TURQUESA_ESCURO = "#0f766e"
+COR_TURQUESA_CLARO = "#e3f5f2"
+COR_PETROLEO = "#0b4a5a"
+COR_PETROLEO_ESCURO = "#06303b"
+COR_PETROLEO_CLARO = "#1c6b7d"
+
+#: Neutros da moldura: fundo da página, superfície dos cartões, texto e fios.
+#:
+#: O fundo NÃO é branco puro: os cartões são brancos e precisam se destacar
+#: contra alguma coisa. O cinza-esverdeado abaixo é o branco da página puxado
+#: na direção do petróleo, o que mantém a página numa temperatura só.
+COR_PAPEL = "#f1f6f6"
+COR_CARTAO = "#ffffff"
+COR_TINTA = "#0e2a33"
+COR_TINTA_SUAVE = "#5d757e"
+COR_LINHA = "#dbe6e8"
+
+#: Título, linha de apoio e data da safra, exibidos no alto da página.
+#:
+#: A data vem de `config.DATA_DADOS` — é a mesma safra dos arquivos do BACEN
+#: lidos pelo ETL, e não uma string de apresentação escrita à parte, para que
+#: trocar de safra não deixe o cabeçalho mentindo.
+TITULO_MAPA = "Mapa da Presença Física das Cooperativas e Bancos"
+OLHO_MAPA = "Cobertura &middot; Mapa interativo"
+SUBTITULO_MAPA = (
+    "Agências e postos de atendimento no Rio Grande do Sul, Santa Catarina "
+    "e Paraná."
+)
+CREDITO_FONTES = (
+    "Fontes: BACEN — agências e postos de atendimento (posição {data}); "
+    "IBGE — malha municipal, população estimada e CNEFE/Censo 2022."
+)
+
+#: Símbolo do cooperativismo — o pinheiro dentro do círculo.
+#:
+#: Vai como SVG inline, e não como imagem: o arquivo é distribuído solto (por
+#: e-mail, por pen drive) e um ``<img src="...">`` apontando para fora quebraria
+#: exatamente aí. Inline, o símbolo viaja dentro do próprio HTML.
+#:
+#: A geometria é a do símbolo: um anel, três pinheiros e a base deles, com os
+#: dois vãos verticais atravessando a figura de cima a baixo. O recorte
+#: (`clipPath`) no miolo do anel é o que corta os pinheiros das pontas contra a
+#: curva do círculo, como no original. `currentColor` deixa a cor ser decidida
+#: pelo CSS de quem o usa, em vez de ficar presa aqui.
+SVG_ICONE_COOPERATIVISMO = """
+<svg class="icone-coop" viewBox="0 0 250 250" role="img"
+     aria-label="Símbolo do cooperativismo">
+  <defs>
+    <clipPath id="coop-miolo"><circle cx="125" cy="125" r="95"/></clipPath>
+  </defs>
+  <circle cx="125" cy="125" r="104" fill="none" stroke="currentColor"
+          stroke-width="18"/>
+  <g clip-path="url(#coop-miolo)" fill="currentColor">
+    <polygon points="24,62 -14,178 62,178"/>
+    <polygon points="125,32 86,178 164,178"/>
+    <polygon points="226,62 188,178 264,178"/>
+    <rect x="-24" y="178" width="86" height="32"/>
+    <rect x="86" y="178" width="78" height="32"/>
+    <rect x="188" y="178" width="86" height="32"/>
+  </g>
+</svg>
+"""
+
+#: O mesmo símbolo, reduzido ao essencial, como ícone da aba do navegador.
+#:
+#: Em 16 px os três pinheiros viram uma mancha; esta versão tem um só, com o
+#: traço do anel mais grosso, que é o que ainda se lê nesse tamanho. Vai como
+#: data URI no ``<link rel="icon">`` pelo mesmo motivo do símbolo grande: nada
+#: neste HTML pode depender de um arquivo ao lado.
+#:
+#: Os atributos usam aspas SIMPLES porque o SVG inteiro vira o valor de um
+#: atributo HTML, que é delimitado por aspas duplas. Com aspas duplas aqui, o
+#: primeiro `xmlns=` fecharia o `href=` do <link> e o resto do símbolo vazaria
+#: para fora da tag — os elementos órfãos acabariam no corpo do documento,
+#: empurrando a página inteira para baixo. O `#` da cor vai como `%23` pelo
+#: mesmo motivo: num data URI ele iniciaria o fragmento.
+_SVG_FAVICON = (
+    "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 250 250'>"
+    "<circle cx='125' cy='125' r='102' fill='none' stroke='%23{cor}' "
+    "stroke-width='26'/>"
+    "<polygon points='125,40 68,182 182,182' fill='%23{cor}'/>"
+    "<rect x='104' y='170' width='42' height='46' fill='%23{cor}'/>"
+    "</svg>"
+)
+
+# --------------------------------------------------------------------------- #
 # Coroplético
 # --------------------------------------------------------------------------- #
 
@@ -251,20 +404,24 @@ _LOGGER = logging.getLogger(__name__)
 #: coluna quando nenhuma foi desmarcada.
 COLUNA_COROPLETICO = "total_geral"
 
-#: Paleta sequencial YlGnBu de 6 classes (ColorBrewer).
+#: Paleta sequencial de 6 classes, da turquesa clara ao azul-petróleo.
 #:
-#: Sequencial porque a variável é uma contagem que só cresce, e YlGnBu porque é
-#: uma das paletas do ColorBrewer marcadas como seguras para daltonismo: a
-#: progressão é monotônica em luminosidade (claro -> escuro), então continua
-#: legível em escala de cinza e para deuteranopia/protanopia, onde uma paleta
-#: verde-vermelho colapsaria.
+#: É a rampa da identidade (`COR_TURQUESA` -> `COR_PETROLEO`), e não uma paleta
+#: pronta do ColorBrewer, mas foi construída sob as mesmas duas exigências que
+#: tornavam a YlGnBu anterior aceitável:
+#:
+#: * sequencial, porque a variável é uma contagem que só cresce;
+#: * monotônica em LUMINOSIDADE, do claro ao escuro. É o que a mantém legível
+#:   em escala de cinza e para deuteranopia/protanopia — a leitura passa a
+#:   depender de claro-escuro, não de matiz, e turquesa e petróleo são vizinhos
+#:   demais para serem separados por matiz de qualquer jeito.
 PALETA_COROPLETICO = [
-    "#ffffcc",
-    "#c7e9b4",
-    "#7fcdbb",
-    "#41b6c4",
-    "#2c7fb8",
-    "#253494",
+    "#c9ece5",
+    "#9addd2",
+    "#63c4be",
+    "#31a1a4",
+    "#1a7583",
+    "#0a4655",
 ]
 
 #: Número máximo de classes do coroplético, incluindo a classe do zero.
@@ -313,10 +470,10 @@ CORES_BANDEIRA = {
 #: categoria à parte, não o piso de uma escala contínua. Sem essa separação,
 #: filtrar por uma bandeira pequena pintaria quase todo o Sul com a cor mais
 #: clara da marca e daria a impressão de presença difusa onde não há nenhuma.
-COR_ZERO = "#eceff1"
+COR_ZERO = "#e9edee"
 
 #: Cor de município sem dado (valor nulo). Distinta de `COR_ZERO`.
-COR_SEM_DADO = "#e6e6e6"
+COR_SEM_DADO = "#d6dbdd"
 
 #: Cor e espessura do contorno de município.
 #:
@@ -325,7 +482,7 @@ COR_SEM_DADO = "#e6e6e6"
 #: de sumir. No modo de pontos não há mancha nenhuma: o fio é a ÚNICA divisa
 #: desenhada sobre o basemap, e em 0,4 px ele praticamente não se lê no
 #: Positron. Daí engrossar quando o preenchimento sai.
-COR_CONTORNO_MUNICIPIO = "#8c98a4"
+COR_CONTORNO_MUNICIPIO = "#a3b7bb"
 LARGURA_CONTORNO_MUNICIPIO = 0.4
 LARGURA_CONTORNO_MUNICIPIO_SEM_FUNDO = 0.8
 
@@ -335,10 +492,10 @@ OPACIDADE_COROPLETICO = 0.78
 #: Traço da divisa entre estados.
 #:
 #: Grosso e escuro contra o fio claro e fino do município: a diferença entre os
-#: dois é o que faz a hierarquia UF -> município ser lida sem legenda. O cinza
-#: azulado escuro tem contraste sobre o Positron sem o peso do preto, que
-#: brigaria com os marcadores.
-COR_DIVISA_UF = "#37474f"
+#: dois é o que faz a hierarquia UF -> município ser lida sem legenda. É o
+#: petróleo escuro da identidade, e não preto: tem contraste de sobra sobre o
+#: Positron sem o peso do preto, que brigaria com os marcadores.
+COR_DIVISA_UF = COR_PETROLEO_ESCURO
 LARGURA_DIVISA_UF = 2.4
 
 #: Painéis (*panes*) do Leaflet criados para este mapa, e o z-index de cada um.
@@ -425,25 +582,29 @@ MODO_AMBOS = "ambos"
 
 #: Rótulo e explicação de cada modo, na ordem em que aparecem no seletor.
 #:
-#: A segunda linha existe porque a mesma lista de bandeiras serve aos dois
-#: modos com efeitos diferentes — no modo cidade ela decide a COR dos
-#: municípios, no modo pontos decide QUAIS marcadores aparecem. Sem a legenda,
-#: marcar uma bandeira no modo cidade parece não fazer nada (o efeito está no
+#: O rótulo é curto porque vira um botão-segmento na barra de controles, onde
+#: três nomes longos não caberiam lado a lado. A `dica` é que carrega a
+#: explicação, exibida ao lado dos botões e trocada junto com a escolha.
+#:
+#: Ela existe porque a mesma lista de bandeiras serve aos dois modos com
+#: efeitos diferentes — no modo de municípios ela decide a COR dos polígonos,
+#: no de pontos decide QUAIS marcadores aparecem. Sem a dica, marcar uma
+#: bandeira no modo de municípios parece não fazer nada (o efeito está no
 #: coroplético, não numa camada que aparece ou some).
 MODOS_VISAO = [
     {
         "id": MODO_CIDADE,
-        "rotulo": "Nível cidade",
-        "dica": "as bandeiras marcadas colorem os municípios",
+        "rotulo": "Municípios",
+        "dica": "a cor de cada município é o total das bandeiras marcadas",
     },
     {
         "id": MODO_PONTOS,
-        "rotulo": "Nível pontos de atendimento",
-        "dica": "as bandeiras marcadas mostram seus pontos",
+        "rotulo": "Pontos",
+        "dica": "um disco por ponto de atendimento das bandeiras marcadas",
     },
     {
         "id": MODO_AMBOS,
-        "rotulo": "Cidade + pontos",
+        "rotulo": "Ambos",
         "dica": "as duas leituras sobrepostas",
     },
 ]
@@ -477,6 +638,14 @@ MAX_SUGESTOES_BUSCA = 8
 #: não se vê mais nem a divisa dele nem os vizinhos. Doze mostra o município
 #: inteiro com o entorno, que é o enquadramento de quem acabou de procurá-lo.
 ZOOM_BUSCA = 12
+
+#: Quantos municípios a lista de maior presença mostra.
+#:
+#: Doze, e não vinte e cinco: a lista responde "onde a rede se concentra", e
+#: essa resposta está nas primeiras posições — o resto é cauda, que o mapa
+#: mostra melhor do que uma lista. Doze também é o que cabe no cartão sem
+#: rolagem na maioria das telas.
+MAX_RANKING = 12
 
 #: Raio do marcador em pixels.
 #:
@@ -535,198 +704,755 @@ OPCOES_CLUSTER = {
 }
 
 # --------------------------------------------------------------------------- #
-# Aparência do painel de camadas
+# Aparência da página
 # --------------------------------------------------------------------------- #
 
-#: CSS do `LayerControl` e da legenda.
+#: As cores e a fonte da identidade, publicadas como variáveis CSS.
 #:
-#: A indentação do nível 2 é resolvida aqui, e não no nome da camada, porque o
-#: Leaflet monta cada linha do painel como ``<label><input><span>nome</span>``:
-#: espaços no nome empurrariam só o texto, deixando a caixinha de seleção
-#: alinhada com a do grupo pai e destruindo a leitura de hierarquia. Com
-#: ``label:has(.camada-sub)`` a linha INTEIRA — caixinha e texto — desloca.
-_CSS_PAINEL = """
-<style>
-.leaflet-control-layers-expanded {
-    max-height: 78vh;
-    overflow-y: auto;
-    font: 12px/1.5 -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
-    padding: 8px 12px 8px 8px;
+#: Existe para que as constantes Python acima sejam a ÚNICA definição de cada
+#: cor. O resto da folha usa `var(--turquesa)` e nunca o valor cru, então
+#: mudar a identidade é editar as constantes — não caçar hexadecimais soltos
+#: em ~600 linhas de CSS.
+_VARIAVEIS_CSS = f"""
+:root {{
+    --fonte: {FONTE_PADRAO};
+    --turquesa: {COR_TURQUESA};
+    --turquesa-escuro: {COR_TURQUESA_ESCURO};
+    --turquesa-claro: {COR_TURQUESA_CLARO};
+    --petroleo: {COR_PETROLEO};
+    --petroleo-escuro: {COR_PETROLEO_ESCURO};
+    --petroleo-claro: {COR_PETROLEO_CLARO};
+    --papel: {COR_PAPEL};
+    --cartao: {COR_CARTAO};
+    --tinta: {COR_TINTA};
+    --tinta-suave: {COR_TINTA_SUAVE};
+    --linha: {COR_LINHA};
+    --raio: 14px;
+    --raio-menor: 9px;
+    --sombra: 0 1px 2px rgba(11, 74, 90, 0.05),
+              0 6px 18px -10px rgba(11, 74, 90, 0.28);
+}}
+"""
+
+#: Folha de estilo da página: moldura, barra de controles, cartões e balões.
+#:
+#: A moldura é um APLICATIVO DE ALTURA FIXA, não um documento que rola: `.app`
+#: ocupa 100vh e o par mapa+coluna recebe a sobra (`flex: 1; min-height: 0`).
+#: É o que garante que os três blocos de decisão — indicadores, controles e
+#: mapa — estejam na tela ao mesmo tempo, sem rolagem. Quem rola é o conteúdo
+#: de cada cartão, dentro dele. Abaixo de 1000 px de largura a regra se
+#: inverte (ver a media query no fim): a coluna vai para baixo do mapa e a
+#: página passa a rolar, porque em tela estreita lado a lado não cabe.
+_CSS_CORPO = """
+html, body {
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    background: var(--papel);
+    color: var(--tinta);
+    font-family: var(--fonte);
+    -webkit-font-smoothing: antialiased;
 }
-.leaflet-control-layers-overlays label {
+* { box-sizing: border-box; }
+
+.app {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    overflow: hidden;
+}
+
+/* --- Faixa de marca ---------------------------------------------------- *
+   Fundo petróleo em vez de branco: é a única superfície escura da página e
+   serve de âncora — abaixo dela tudo é claro, e o olho encontra o topo sem
+   procurar. */
+.app-topo {
+    flex: none;
+    background: var(--petroleo);
+    color: #fff;
+}
+.app-topo-interno {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    max-width: 1680px;
+    margin: 0 auto;
+    padding: 9px 20px;
+}
+.marca {
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    min-width: 0;
+}
+.icone-coop {
     display: block;
-    margin: 1px 0;
+    width: 34px;
+    height: 34px;
+    color: var(--turquesa);
 }
-/* Nível 1 — grupo pai: negrito e respiro acima, para abrir bloco. */
-.leaflet-control-layers-overlays label:has(.camada-grupo) {
-    margin-top: 9px;
-    font-weight: 600;
-}
-/* Nível 2 — subgrupo: linha inteira indentada, com fio-guia à esquerda. */
-.leaflet-control-layers-overlays label:has(.camada-sub) {
-    margin-left: 9px;
-    padding-left: 9px;
-    border-left: 2px solid #cbd5dd;
-}
-.camada-contagem {
-    color: #6b7785;
-    font-weight: 400;
-}
-/* Seletor de modo de visão, no topo do painel: é a escolha de PRIMEIRO
-   nível, então vem antes da lista de bandeiras e separada dela por um fio. */
-.modo-visao {
-    margin: 0 0 6px;
-    padding-bottom: 7px;
-    border-bottom: 1px solid #b8c2cc;
-}
-.modo-visao label {
+.marca-texto { line-height: 1.25; min-width: 0; }
+.marca-texto b {
     display: block;
-    margin: 3px 0;
-    font-weight: 600;
-    cursor: pointer;
+    font-size: 14px;
+    font-weight: bold;
+    letter-spacing: 0.2px;
 }
-.modo-visao input {
-    margin: 0 5px 0 0;
-    vertical-align: -1px;
-}
-.modo-visao .modo-dica {
+.marca-texto small {
     display: block;
-    margin-left: 18px;
-    color: #6b7785;
-    font-weight: 400;
     font-size: 11px;
+    color: #9fc4cd;
 }
-/* Filtro de UF, logo abaixo do modo: as duas escolhas de ESCOPO da leitura
-   ficam juntas e antes da lista de bandeiras, que é escolha de conteúdo. As
-   três siglas cabem numa linha só, então cada uma é um alvo de um clique — um
-   <select> custaria dois para o mesmo efeito. */
-.filtro-uf {
-    margin: 0 0 6px;
-    padding-bottom: 7px;
-    border-bottom: 1px solid #b8c2cc;
+/* Selo da safra: a data do dado é a primeira pergunta de quem recebe um mapa
+   pronto, então ela fica no topo, e não num rodapé de fonte. */
+.selo-safra {
+    flex: none;
+    padding: 5px 12px;
+    border: 1px solid rgba(94, 234, 212, 0.4);
+    border-radius: 999px;
+    background: rgba(20, 184, 166, 0.14);
+    color: #9beadd;
+    font-size: 11px;
+    letter-spacing: 0.3px;
+    white-space: nowrap;
 }
-.filtro-uf .filtro-titulo {
-    display: block;
-    margin-bottom: 3px;
-    font-weight: 600;
+.selo-safra b { color: #fff; font-weight: bold; }
+
+.app-corpo {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    min-height: 0;
+    width: 100%;
+    max-width: 1680px;
+    margin: 0 auto;
+    padding: 12px 20px 11px;
 }
-.filtro-uf label {
-    display: inline-block;
-    margin: 0 9px 0 0;
+
+/* --- Título e indicadores, lado a lado --------------------------------- *
+   Dividem uma linha só porque a soma dos dois empilhados custaria ~180 px da
+   altura do mapa. Em tela estreita a linha quebra e os indicadores descem. */
+.app-abertura {
+    flex: none;
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 20px;
+    flex-wrap: wrap;
+}
+/* `flex: 0 1 auto` no título e `flex: 1 1 0` nos indicadores: a linha tem
+   largura de sobra para os dois, mas a faixa de indicadores mede pelo texto
+   mais largo de cada cartão e pedia ~830 px, o que estourava a linha e a fazia
+   quebrar. Com base zero eles passam a dividir o que sobra do título, e cada
+   nota que não couber é cortada com reticências em vez de virar duas linhas. */
+.app-cabecalho {
+    flex: 0 1 auto;
+    min-width: 280px;
+}
+.olho {
+    margin: 0 0 5px;
+    color: var(--turquesa-escuro);
+    font-size: 10.5px;
+    font-weight: bold;
+    letter-spacing: 1.3px;
+    text-transform: uppercase;
+}
+.app-cabecalho h1 {
+    margin: 0;
+    color: var(--petroleo);
+    font-size: 22px;
+    font-weight: bold;
+    letter-spacing: -0.4px;
+    line-height: 1.15;
+}
+.app-linha-fina {
+    margin: 5px 0 0;
+    color: var(--tinta-suave);
+    font-size: 12.5px;
+}
+
+/* --- Indicadores -------------------------------------------------------- *
+   Quatro números que respondem à seleção atual, na ordem em que a pergunta
+   costuma ser feita: quanto existe, onde existe, onde NÃO existe e quanta
+   gente mora no que não existe. O quarto é o que transforma o mapa em pauta
+   de decisão — sem ele, "347 municípios sem atendimento" não tem tamanho. */
+.indicadores {
+    flex: 1 1 0;
+    min-width: 0;
+    display: grid;
+    grid-template-columns: repeat(4, minmax(112px, 1fr));
+    gap: 9px;
+}
+.indicador-rotulo,
+.indicador-nota {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.indicador {
+    padding: 7px 11px;
+    background: var(--cartao);
+    border: 1px solid var(--linha);
+    border-radius: var(--raio-menor);
+    box-shadow: var(--sombra);
+}
+.indicador-rotulo {
+    margin: 0;
+    color: var(--tinta-suave);
+    font-size: 10px;
+    font-weight: bold;
+    letter-spacing: 0.55px;
+    text-transform: uppercase;
+}
+.indicador-valor {
+    margin: 2px 0 0;
+    color: var(--petroleo);
+    font-size: 20px;
+    font-weight: bold;
+    letter-spacing: -0.5px;
+    line-height: 1.1;
+}
+.indicador-nota {
+    margin: 1px 0 0;
+    color: var(--tinta-suave);
+    font-size: 11px;
+    min-height: 15px;
+}
+/* O indicador de lacuna é o único com cor própria: ele não descreve o que a
+   rede cobre, e sim o que ela deixa de fora. */
+.indicador.lacuna .indicador-valor { color: var(--turquesa-escuro); }
+
+/* --- Barra de controles ------------------------------------------------- */
+.barra {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    padding: 6px 8px;
+    background: var(--cartao);
+    border: 1px solid var(--linha);
+    border-radius: var(--raio);
+    box-shadow: var(--sombra);
+}
+.barra-grupo {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+}
+.barra-rotulo {
+    color: var(--tinta-suave);
+    font-size: 10px;
+    font-weight: bold;
+    letter-spacing: 0.55px;
+    text-transform: uppercase;
+    white-space: nowrap;
+}
+.barra-divisor {
+    width: 1px;
+    align-self: stretch;
+    margin: 0 2px;
+    background: var(--linha);
+}
+/* Segmentos: o rádio some e quem pinta é o <label>, via `:has(:checked)`.
+   O <input> continua no DOM — não é decoração, é o que dá navegação por
+   teclado e leitura por leitor de tela de graça. */
+.segmentos {
+    display: flex;
+    gap: 3px;
+    padding: 3px;
+    background: var(--papel);
+    border-radius: var(--raio-menor);
+}
+.segmento {
+    position: relative;
+    padding: 5px 10px;
+    border-radius: 7px;
+    color: var(--tinta-suave);
+    font-size: 12px;
+    font-weight: bold;
+    white-space: nowrap;
     cursor: pointer;
+    transition: background 0.12s, color 0.12s;
 }
-.filtro-uf input {
-    margin: 0 3px 0 0;
-    vertical-align: -1px;
+.segmento input {
+    position: absolute;
+    opacity: 0;
+    width: 0;
+    height: 0;
 }
-/* Busca de município: campo próprio no canto superior esquerdo, sob o zoom.
-   Fora do painel de camadas de propósito — ali dentro a lista de sugestões
-   ficaria presa ao `overflow-y: auto` do painel e rolaria junto com ele. */
+.segmento:hover { color: var(--petroleo); }
+.segmento:has(input:checked) {
+    background: var(--turquesa-escuro);
+    color: #fff;
+}
+.segmento:has(input:focus-visible) {
+    outline: 2px solid var(--turquesa);
+    outline-offset: 1px;
+}
+/* A explicação do modo fica FORA do botão: dentro, ela dobraria a altura da
+   barra só para repetir o que o rótulo já diz na maior parte do tempo. */
+.barra-dica {
+    flex: 1 1 60px;
+    min-width: 0;
+    color: var(--tinta-suave);
+    font-size: 11.5px;
+    font-style: italic;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* --- Busca de município ------------------------------------------------- */
 .busca-municipio {
     position: relative;
-    width: 224px;
-    font: 12px/1.45 -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+    width: 232px;
+    flex: none;
 }
 .busca-municipio input {
-    box-sizing: border-box;
     width: 100%;
-    padding: 6px 8px;
-    border: 1px solid #b8c2cc;
-    border-radius: 4px;
-    background: rgba(255, 255, 255, 0.96);
-    color: #33414e;
-    font: inherit;
-    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
+    padding: 7px 10px;
+    border: 1px solid var(--linha);
+    border-radius: var(--raio-menor);
+    background: var(--papel);
+    color: var(--tinta);
+    font: 12px/1.4 var(--fonte);
 }
+.busca-municipio input::placeholder { color: var(--tinta-suave); }
 .busca-municipio input:focus {
-    outline: 2px solid #2c7fb8;
-    outline-offset: -1px;
+    outline: none;
+    border-color: var(--turquesa);
+    box-shadow: 0 0 0 3px rgba(20, 184, 166, 0.18);
 }
+/* A lista flutua sobre o mapa (`position: absolute` + z-index acima dos
+   controles do Leaflet, que vão até 1000): dentro do fluxo ela empurraria a
+   barra e o mapa para baixo a cada tecla digitada. */
 .busca-sugestoes {
-    margin: 3px 0 0;
-    padding: 0;
-    max-height: 232px;
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    right: 0;
+    z-index: 1200;
+    margin: 0;
+    padding: 4px;
+    max-height: 244px;
     overflow-y: auto;
     list-style: none;
-    background: #fff;
-    border: 1px solid #b8c2cc;
-    border-radius: 4px;
-    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
+    background: var(--cartao);
+    border: 1px solid var(--linha);
+    border-radius: var(--raio-menor);
+    box-shadow: 0 10px 26px -8px rgba(11, 74, 90, 0.35);
+    font-size: 12px;
 }
-.busca-sugestoes[hidden] {
-    display: none;
-}
+.busca-sugestoes[hidden] { display: none; }
 .busca-sugestoes li {
-    padding: 4px 8px;
+    padding: 6px 8px;
+    border-radius: 6px;
     cursor: pointer;
 }
 .busca-sugestoes li.ativa {
-    background: #dbeaf5;
+    background: var(--turquesa-claro);
+    color: var(--petroleo);
 }
 .busca-sugestoes .busca-uf {
-    color: #6b7785;
+    color: var(--tinta-suave);
+    font-size: 11px;
 }
 .busca-sugestoes .busca-vazio {
-    color: #6b7785;
+    color: var(--tinta-suave);
     cursor: default;
 }
-/* Amostra da cor da bandeira, do lado do nome dela no painel. Redonda e do
-   tamanho do marcador, para ser lida como "este é o ponto no mapa". */
+
+/* --- Mapa e coluna lateral ---------------------------------------------- */
+.area {
+    flex: 1;
+    display: flex;
+    gap: 12px;
+    min-height: 0;
+}
+.cartao {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    background: var(--cartao);
+    border: 1px solid var(--linha);
+    border-radius: var(--raio);
+    box-shadow: var(--sombra);
+    overflow: hidden;
+}
+.cartao-mapa { flex: 1; min-width: 0; }
+/* O mapa do folium é movido para cá pelo controlador (ver `_JS_CONTROLADOR`);
+   ele chega com `width/height: 100%`, então o encaixe só precisa ter altura
+   própria — que vem do `flex: 1` sobre um pai de altura definida. */
+.mapa-slot {
+    position: relative;
+    flex: 1;
+    min-height: 0;
+}
+.coluna-lateral {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    width: 320px;
+    flex: none;
+    min-height: 0;
+}
+/* A lista de bandeiras pede a altura do proprio conteudo (`flex-basis: auto`,
+   sem crescer) e o ranking fica com o que sobrar. E o que evita a lista
+   principal de controle rolar em tela grande, onde as 16 linhas cabem
+   inteiras, sem deixar o ranking sumir em tela pequena — os dois `min-height`
+   seguram o piso quando a coluna aperta. */
+.cartao-bandeiras {
+    flex: 0 1 auto;
+    min-height: 170px;
+}
+.cartao-ranking {
+    flex: 1 1 180px;
+    min-height: 150px;
+}
+.cartao-topo {
+    flex: none;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--linha);
+}
+.cartao-topo h2 {
+    margin: 0;
+    color: var(--petroleo);
+    font-size: 12.5px;
+    font-weight: bold;
+    letter-spacing: 0.1px;
+}
+.cartao-nota {
+    color: var(--tinta-suave);
+    font-size: 11px;
+    white-space: nowrap;
+}
+.cartao-conteudo {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 8px 12px 12px;
+}
+.acoes { display: flex; gap: 5px; flex: none; }
+.acoes button {
+    padding: 4px 9px;
+    border: 1px solid var(--linha);
+    border-radius: 999px;
+    background: var(--papel);
+    color: var(--tinta-suave);
+    font: bold 11px var(--fonte);
+    cursor: pointer;
+}
+.acoes button:hover {
+    border-color: var(--turquesa);
+    background: var(--turquesa-claro);
+    color: var(--turquesa-escuro);
+}
+
+/* --- Lista de bandeiras (o LayerControl do Leaflet, remontado aqui) ------ *
+   O painel é movido para dentro do cartão pelo controlador, então tudo que o
+   Leaflet lhe dá de aparência de controle flutuante — fundo, borda, sombra,
+   `float`, largura mínima — é desfeito abaixo. O que fica é a lista. */
+#painel-bandeiras .leaflet-control-layers {
+    width: 100%;
+    margin: 0;
+    border: none;
+    border-radius: 0;
+    box-shadow: none;
+    background: transparent;
+    float: none;
+}
+/* O Leaflet grava uma altura em pixels neste elemento ao abrir o painel,
+   calculada sobre o tamanho do MAPA. Dentro do cartão essa conta não vale — a
+   rolagem passa a ser do cartão. */
+#painel-bandeiras .leaflet-control-layers-list {
+    height: auto !important;
+    margin: 0;
+}
+#painel-bandeiras .leaflet-control-layers-toggle { display: none; }
+#painel-bandeiras .leaflet-control-layers-separator { display: none; }
+/* O Leaflet monta cada linha como ``label > span > (input, span)``: o <span>
+   externo embrulha caixa e rótulo, o interno recebe o HTML do nome — que aqui
+   traz a amostra de cor, o texto e a contagem. Os dois viram caixas flex, e é
+   isso que alinha os três pedaços numa linha e empurra a contagem para a
+   direita. */
+#painel-bandeiras .leaflet-control-layers-overlays label {
+    display: block;
+    margin: 0;
+    padding: 5px 7px;
+    border-radius: 7px;
+    font-size: 12px;
+    cursor: pointer;
+}
+#painel-bandeiras .leaflet-control-layers-overlays label:hover {
+    background: var(--turquesa-claro);
+}
+#painel-bandeiras .leaflet-control-layers-overlays label > span {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+}
+#painel-bandeiras .leaflet-control-layers-overlays label > span > span {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+}
+#painel-bandeiras input[type="checkbox"] {
+    flex: none;
+    width: 14px;
+    height: 14px;
+    margin: 0;
+    accent-color: var(--turquesa-escuro);
+    cursor: pointer;
+}
+/* Nível 1 — a categoria: caixa-alta pequena e fio acima, para abrir bloco. */
+.leaflet-control-layers-overlays label:has(.camada-grupo) {
+    margin-top: 10px !important;
+    border-top: 1px solid var(--linha);
+    border-radius: 0;
+    padding-top: 10px !important;
+}
+.leaflet-control-layers-overlays label:first-child:has(.camada-grupo) {
+    margin-top: 0 !important;
+    border-top: none;
+    padding-top: 5px !important;
+}
+.camada-grupo {
+    flex: 1;
+    color: var(--petroleo);
+    font-weight: bold;
+    font-size: 11px;
+    letter-spacing: 0.7px;
+    text-transform: uppercase;
+}
+/* Nível 2 — a bandeira: linha inteira indentada, com fio-guia à esquerda. */
+.leaflet-control-layers-overlays label:has(.camada-sub) {
+    margin-left: 9px !important;
+    border-left: 2px solid var(--linha);
+    border-radius: 0 7px 7px 0;
+}
+.camada-sub {
+    flex: 1;
+    color: var(--tinta);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.camada-contagem {
+    flex: none;
+    margin-left: auto;
+    color: var(--tinta-suave);
+    font-weight: normal;
+    font-variant-numeric: tabular-nums;
+}
+/* Amostra da cor da bandeira. Redonda e do tamanho do marcador, para ser lida
+   como "este é o ponto no mapa". */
 .camada-cor {
+    flex: none;
     display: inline-block;
     width: 11px;
     height: 11px;
-    margin-right: 5px;
     border: 1px solid;
     border-radius: 50%;
-    vertical-align: -1px;
 }
-.legenda-mapa {
-    position: fixed;
-    bottom: 22px;
-    left: 12px;
-    z-index: 9999;
-    background: rgba(255, 255, 255, 0.94);
-    border: 1px solid #b8c2cc;
-    border-radius: 4px;
-    padding: 10px 12px;
-    font: 12px/1.45 -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
-    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
+
+/* --- Ranking de municípios ---------------------------------------------- *
+   A pergunta "onde estão os maiores" não se responde olhando um coroplético:
+   as manchas escuras ficam nas capitais, que o leitor já conhece. A lista
+   ordenada responde direto, e cada linha enquadra o município no mapa. */
+.ranking {
+    margin: 0;
+    padding: 6px 8px 12px;
+    list-style: none;
+    counter-reset: posicao;
 }
-.legenda-mapa h4 {
-    margin: 0 0 2px;
-    font-size: 12px;
+.ranking li {
+    display: grid;
+    grid-template-columns: 20px 1fr auto;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 6px;
+    border-radius: 7px;
+    cursor: pointer;
 }
-.legenda-mapa .legenda-sub {
-    margin: 0 0 7px;
-    color: #6b7785;
+.ranking li:hover { background: var(--turquesa-claro); }
+.ranking .posicao {
+    color: var(--tinta-suave);
     font-size: 11px;
+    font-variant-numeric: tabular-nums;
+    text-align: right;
 }
-.legenda-mapa table {
-    border-collapse: collapse;
+.ranking .nome {
+    min-width: 0;
+    font-size: 12px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
-.legenda-mapa td {
-    padding: 1px 5px 1px 0;
+.ranking .nome em {
+    color: var(--tinta-suave);
+    font-size: 10.5px;
+    font-style: normal;
+}
+.ranking .valor {
+    color: var(--petroleo);
+    font-size: 12px;
+    font-weight: bold;
+    font-variant-numeric: tabular-nums;
+}
+/* A barra ocupa a linha inteira, atrás do nome, para que a comparação entre
+   posições seja visual e não exija ler os números um a um. */
+.ranking .trilho {
+    grid-column: 2 / 4;
+    height: 3px;
+    margin-top: -2px;
+    border-radius: 2px;
+    background: var(--papel);
+    overflow: hidden;
+}
+.ranking .trilho i {
+    display: block;
+    height: 100%;
+    border-radius: 2px;
+    background: var(--turquesa);
+}
+.ranking .vazio {
+    display: block;
+    padding: 8px 6px;
+    color: var(--tinta-suave);
+    font-size: 12px;
+    cursor: default;
+}
+
+/* --- Legenda, no rodapé do cartão do mapa ------------------------------- *
+   Faixa horizontal, e não caixa flutuante sobre o mapa: flutuando ela tapa
+   município, e num mapa cujas classes mudam a cada clique a legenda é parte
+   da leitura — não pode estar por cima do que descreve. */
+.mapa-rodape {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    flex-wrap: wrap;
+    padding: 6px 12px;
+    border-top: 1px solid var(--linha);
+    background: var(--cartao);
+    font-size: 11.5px;
+}
+.legenda-titulo {
+    color: var(--petroleo);
+    font-weight: bold;
     white-space: nowrap;
 }
-.legenda-mapa .amostra {
-    display: inline-block;
-    width: 22px;
-    height: 12px;
-    border: 1px solid #7d8894;
-    vertical-align: -2px;
+.legenda-titulo span {
+    color: var(--tinta-suave);
+    font-weight: normal;
 }
-.legenda-mapa .n-municipios {
-    color: #6b7785;
+.legenda-escala { display: flex; align-items: flex-end; gap: 2px; }
+.legenda-classe { text-align: center; min-width: 44px; }
+.legenda-classe i {
+    display: block;
+    height: 10px;
+    border: 1px solid rgba(11, 74, 90, 0.18);
+    border-radius: 2px;
+}
+.legenda-classe b {
+    display: block;
+    margin-top: 3px;
+    font-size: 10.5px;
+    font-weight: normal;
+    font-variant-numeric: tabular-nums;
+}
+.legenda-classe small {
+    display: block;
+    color: var(--tinta-suave);
+    font-size: 9.5px;
+}
+.legenda-classe.zero { margin-right: 8px; }
+.legenda-recado { color: var(--tinta-suave); }
+.legenda-fonte {
+    margin-left: auto;
+    color: var(--tinta-suave);
+    font-size: 10.5px;
+    text-align: right;
+}
+
+/* --- Rodapé de fontes --------------------------------------------------- */
+.app-rodape {
+    flex: none;
+    color: var(--tinta-suave);
+    font-size: 10px;
+    line-height: 1.4;
+}
+
+/* --- Ajustes no Leaflet ------------------------------------------------- */
+.leaflet-container { font-family: var(--fonte) !important; }
+.leaflet-bar a,
+.leaflet-control-zoom a {
+    color: var(--petroleo);
+    border-bottom-color: var(--linha);
+    font-family: var(--fonte);
+    font-size: 19px;
+}
+.leaflet-bar a:hover { background: var(--turquesa-claro); }
+.leaflet-bar {
+    border: 1px solid var(--linha);
+    box-shadow: var(--sombra);
+}
+.leaflet-control-attribution {
+    background: rgba(255, 255, 255, 0.86) !important;
+    color: var(--tinta-suave);
+    font-size: 10px;
+}
+.leaflet-control-attribution a { color: var(--turquesa-escuro); }
+.leaflet-control-scale-line {
+    border-color: var(--tinta-suave);
+    color: var(--tinta);
+    background: rgba(255, 255, 255, 0.8);
+}
+/* Balão de contagem do MarkerCluster nas duas cores da identidade — o padrão
+   do plugin é verde-amarelo-laranja, que brigava com a rampa do coroplético
+   e sugeria uma escala de cor que não existe ali. */
+.marker-cluster div {
+    background: var(--turquesa-escuro);
+    color: #fff;
+    font: bold 11px var(--fonte);
+}
+.marker-cluster { background: rgba(20, 184, 166, 0.32); }
+.marker-cluster-large div { background: var(--petroleo); }
+.marker-cluster-large { background: rgba(11, 74, 90, 0.3); }
+
+/* --- Balões de município e de ponto ------------------------------------- */
+.leaflet-popup-content-wrapper {
+    border-radius: var(--raio-menor);
+    box-shadow: 0 12px 30px -10px rgba(11, 74, 90, 0.45);
+}
+.leaflet-popup-content { margin: 12px 14px; }
+.leaflet-tooltip {
+    border: 1px solid var(--linha);
+    border-radius: 7px;
+    box-shadow: var(--sombra);
+    font-family: var(--fonte);
 }
 .popup-municipio {
-    font: 12px/1.45 -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+    font: 12px/1.45 var(--fonte);
     max-height: 320px;
     overflow-y: auto;
 }
 .popup-municipio h4 {
-    margin: 0 0 6px;
-    font-size: 13px;
+    margin: 0 0 7px;
+    color: var(--petroleo);
+    font-size: 13.5px;
+    font-weight: bold;
 }
 .popup-municipio table {
     border-collapse: collapse;
@@ -734,21 +1460,23 @@ _CSS_PAINEL = """
 }
 .popup-municipio th {
     text-align: left;
-    font-weight: 600;
+    font-weight: bold;
     padding: 1px 8px 1px 0;
 }
 .popup-municipio td {
     text-align: right;
     padding: 1px 0;
+    font-variant-numeric: tabular-nums;
 }
 .popup-municipio .secao {
     padding-top: 5px;
-    border-top: 1px solid #dfe4e9;
-    font-weight: 600;
+    border-top: 1px solid var(--linha);
 }
+.popup-municipio .secao th { color: var(--petroleo); }
 .popup-municipio .bandeira th {
-    font-weight: 400;
+    font-weight: normal;
     padding-left: 10px;
+    color: var(--tinta-suave);
 }
 .popup-municipio .indisponivel,
 .aviso-posicao {
@@ -758,27 +1486,48 @@ _CSS_PAINEL = """
 /* Procedência da coordenada nos dois níveis precisos: informação de rodapé,
    não advertência — daí o cinza em vez do âmbar de `.aviso-posicao`. */
 .procedencia {
-    color: #6b7785;
+    color: var(--tinta-suave);
     font-size: 11px;
 }
-/* Cabeçalho que o controlador reativo insere no popup/tooltip do município,
-   com o total da seleção atual. */
+.popup-secundario { color: var(--tinta-suave); }
+/* Cabeçalho que o controlador insere no balão do município, com o total da
+   seleção atual. */
 .selecao-atual {
-    margin-bottom: 5px;
-    padding-bottom: 4px;
-    border-bottom: 1px solid #dfe4e9;
-    font: 12px/1.45 -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
-    color: #33414e;
+    margin-bottom: 6px;
+    padding: 5px 8px;
+    border-radius: 6px;
+    background: var(--turquesa-claro);
+    color: var(--petroleo);
+    font: 12px/1.4 var(--fonte);
 }
+.selecao-atual b { font-size: 13px; }
 /* O folium embrulha o conteúdo do GeoJsonPopup/Tooltip numa <table>; sem isto
-   a tabela interna do popup herda a borda e o padding dessa casca. */
+   a tabela interna do balão herda a borda e o padding dessa casca. */
 .leaflet-popup-content table td,
 .leaflet-tooltip table td {
     border: none;
     padding: 0;
 }
-</style>
+
+/* --- Telas estreitas ---------------------------------------------------- *
+   Abaixo de 1000 px o lado a lado não cabe: a coluna desce para baixo do
+   mapa, os dois ganham altura fixa e a página volta a rolar. */
+@media (max-width: 1000px) {
+    .app { height: auto; overflow: visible; }
+    .app-corpo { padding: 14px 14px 18px; }
+    .indicadores { grid-template-columns: repeat(2, minmax(122px, 1fr)); }
+    .area { flex-direction: column; }
+    .cartao-mapa { height: 62vh; min-height: 380px; flex: none; }
+    .coluna-lateral { width: 100%; }
+    .cartao-bandeiras, .cartao-ranking { height: 340px; flex: none; }
+    .barra-busca { flex: 1 1 100%; }
+    .busca-municipio { width: 100%; }
+    .barra-dica { display: none; }
+}
 """
+
+#: CSS completo da página, pronto para entrar no ``<head>``.
+_CSS_PAGINA = "<style>" + _VARIAVEIS_CSS + _CSS_CORPO + "</style>"
 
 
 # --------------------------------------------------------------------------- #
@@ -929,9 +1678,23 @@ def preparar_textos_municipio(agregado: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
         agregado: saída de `carregar_agregado`.
 
     Returns:
-        Uma CÓPIA do agregado com as colunas ``popup_html`` e ``tooltip_html``.
+        Uma CÓPIA do agregado com as colunas ``popup_html``, ``tooltip_html`` e
+        ``populacao_valor``.
     """
     com_textos = agregado.copy()
+
+    # A população precisa chegar ao navegador como NÚMERO (o indicador de
+    # lacuna a soma), e não como o texto já formatado do popup.
+    #
+    # A conversão para `int`/`None` na mão, em vez de deixar o `Int64` seguir
+    # para o GeoJSON, é o que garante `null` no arquivo: o valor ausente do
+    # pandas serializa como `NaN`, que não é JSON válido e faria `JSON.parse`
+    # falhar na leitura do arquivo por qualquer ferramenta que não seja o
+    # próprio navegador.
+    com_textos["populacao_valor"] = [
+        None if pd.isna(valor) else int(valor)
+        for valor in com_textos["populacao"]
+    ]
 
     def _popup(linha: pd.Series) -> str:
         nome = html.escape(str(linha["municipio_nome"]))
@@ -957,7 +1720,8 @@ def preparar_textos_municipio(agregado: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
             f"<b>{nome}/{uf}</b><br>"
             f"Cooperativas: {_formatar_inteiro(linha['total_cooperativas'])}"
             f" &nbsp;|&nbsp; Bancos: {_formatar_inteiro(linha['total_bancos'])}"
-            "<br><span style='color:#6b7785'>clique para o detalhamento</span>"
+            '<br><span class="popup-secundario">clique para o detalhamento'
+            "</span>"
         )
 
     com_textos["popup_html"] = com_textos.apply(_popup, axis=1)
@@ -1042,10 +1806,15 @@ def adicionar_coropletico(
     # As 14 colunas por bandeira vão para as propriedades da feição porque é o
     # cliente que soma a seleção atual — sem elas, filtrar por bandeira no
     # navegador seria impossível. É o que permite o coroplético reativo.
+    #
+    # `populacao_valor` entra pelo mesmo motivo, um nível acima: é dela que sai
+    # o indicador de população em municípios SEM nenhum ponto da seleção, que
+    # também muda a cada clique.
     colunas = [
         "municipio_ibge",
         "municipio_nome",
         "uf",
+        "populacao_valor",
         "total_geral",
         "total_bancos",
         "total_cooperativas",
@@ -1069,7 +1838,10 @@ def adicionar_coropletico(
             "weight": LARGURA_CONTORNO_MUNICIPIO,
             "fillOpacity": OPACIDADE_COROPLETICO,
         },
-        highlight_function=lambda _feicao: {"weight": 2.2, "color": "#333333"},
+        highlight_function=lambda _feicao: {
+            "weight": 2.4,
+            "color": COR_PETROLEO_ESCURO,
+        },
         tooltip=folium.GeoJsonTooltip(fields=["tooltip_html"], labels=False, sticky=True),
         popup=folium.GeoJsonPopup(fields=["popup_html"], labels=False, max_width=340),
         smooth_factor=0.5,
@@ -1201,24 +1973,176 @@ def ufs_do_recorte(agregado: gpd.GeoDataFrame) -> list[str]:
     return conhecidas + novas
 
 
-def adicionar_legenda(mapa: folium.Map) -> None:
-    """Adiciona o contêiner vazio da legenda do coroplético.
+# --------------------------------------------------------------------------- #
+# 4. Moldura da página
+# --------------------------------------------------------------------------- #
 
-    O conteúdo é escrito pelo controlador em JavaScript, e reescrito a cada
-    mudança de seleção: as classes mudam junto com as bandeiras marcadas, então
-    uma legenda gerada em Python descreveria a seleção inicial e mentiria a
-    partir do primeiro clique.
+
+def _segmentos(nome: str, opcoes: list[tuple[str, str]], marcado: str) -> str:
+    """Monta um grupo de botões-segmento (rádios estilizados) da barra.
+
+    Os rádios são gerados aqui, em Python, e não pelo controlador em
+    JavaScript: os modos e as UFs são conhecidos na geração, e HTML que já
+    nasce no arquivo aparece na primeira pintura — o que o JavaScript montasse
+    piscaria depois. O controlador só liga os ouvintes.
 
     Args:
-        mapa: mapa base.
+        nome: valor de ``name`` compartilhado pelos rádios do grupo.
+        opcoes: pares ``(valor, rótulo)`` na ordem de exibição.
+        marcado: o valor que abre marcado.
+
+    Returns:
+        O HTML do grupo.
     """
-    mapa.get_root().html.add_child(
-        Element('<div class="legenda-mapa" id="legenda-coropletico"></div>')
+    botoes = "".join(
+        f'<label class="segmento"><input type="radio" name="{nome}" '
+        f'value="{html.escape(valor)}"'
+        f'{" checked" if valor == marcado else ""}>{rotulo}</label>'
+        for valor, rotulo in opcoes
+    )
+    return f'<div class="segmentos">{botoes}</div>'
+
+
+def _html_indicadores() -> str:
+    """Monta os quatro cartões de indicador, ainda sem número.
+
+    Os valores são escritos pelo controlador a cada mudança de seleção — ver
+    `_JS_CONTROLADOR`. O que sai daqui é só a moldura, com um traço no lugar do
+    número: gerar o valor da seleção inicial em Python o deixaria desatualizado
+    já no primeiro clique.
+
+    Returns:
+        O HTML da faixa de indicadores.
+    """
+    cartoes = [
+        ("kpi-pontos", "Pontos de atendimento", ""),
+        ("kpi-municipios", "Municípios atendidos", ""),
+        ("kpi-vazios", "Municípios sem atendimento", " lacuna"),
+        ("kpi-populacao", "População sem atendimento", " lacuna"),
+    ]
+    return (
+        '<section class="indicadores" aria-live="polite">'
+        + "".join(
+            f'<article class="indicador{extra}">'
+            f'<p class="indicador-rotulo">{rotulo}</p>'
+            f'<p class="indicador-valor" id="{ident}">&mdash;</p>'
+            f'<p class="indicador-nota" id="{ident}-nota"></p>'
+            "</article>"
+            for ident, rotulo, extra in cartoes
+        )
+        + "</section>"
     )
 
 
+def adicionar_moldura(mapa: folium.Map, agregado: gpd.GeoDataFrame) -> None:
+    """Injeta a moldura da página: marca, título, indicadores, barra e cartões.
+
+    O que entra aqui é a página INTEIRA em volta do mapa — cabeçalho de marca,
+    título, os quatro indicadores, a barra de leitura/estado/busca, o cartão do
+    mapa (vazio), a coluna de bandeiras e de ranking, e o rodapé de fontes. O
+    mapa e o painel de camadas são MOVIDOS para dentro dela pelo controlador,
+    assim que a página carrega (ver `_JS_CONTROLADOR`).
+
+    Mover em vez de gerar no lugar certo é imposição do folium: os elementos
+    adicionados a ``get_root().html`` são escritos ANTES da ``<div>`` do mapa,
+    que só é anexada ao documento durante a renderização. Não há como abrir a
+    moldura antes e fechá-la depois sem partir o HTML em dois pedaços
+    desbalanceados, um de cada lado do mapa. Com a moldura inteira de um lado e
+    uma linha de JavaScript encaixando o mapa nela, o HTML fica bem formado e o
+    encaixe acontece antes da primeira pintura — os scripts do folium são
+    síncronos, então nada pisca.
+
+    Args:
+        mapa: mapa base.
+        agregado: saída de `carregar_agregado`, de onde sai a lista de UFs do
+            filtro de estado.
+    """
+    modos = [(modo["id"], html.escape(modo["rotulo"])) for modo in MODOS_VISAO]
+    ufs = [("", "Todos")] + [(uf, uf) for uf in ufs_do_recorte(agregado)]
+
+    moldura = f"""
+<div class="app">
+  <header class="app-topo">
+    <div class="app-topo-interno">
+      <span class="marca">
+        {SVG_ICONE_COOPERATIVISMO}
+        <span class="marca-texto">
+          <b>Presença Física</b>
+          <small>Cooperativas de crédito e bancos &middot; Região Sul</small>
+        </span>
+      </span>
+      <span class="selo-safra">Dados de <b>{config.DATA_DADOS}</b></span>
+    </div>
+  </header>
+
+  <div class="app-corpo">
+    <div class="app-abertura">
+      <div class="app-cabecalho">
+        <p class="olho">{OLHO_MAPA}</p>
+        <h1>{TITULO_MAPA}</h1>
+        <p class="app-linha-fina">{SUBTITULO_MAPA}</p>
+      </div>
+      {_html_indicadores()}
+    </div>
+
+    <div class="barra">
+      <div class="barra-grupo">
+        <span class="barra-rotulo">Leitura</span>
+        {_segmentos("modo-visao", modos, MODO_INICIAL)}
+      </div>
+      <div class="barra-divisor"></div>
+      <div class="barra-grupo">
+        <span class="barra-rotulo">Estado</span>
+        {_segmentos("filtro-uf", ufs, "")}
+      </div>
+      <div class="barra-dica" id="dica-modo"></div>
+      <div class="barra-grupo barra-busca">
+        <div class="busca-municipio">
+          <input id="busca-campo" type="text" autocomplete="off"
+                 placeholder="{html.escape(TEXTO_BUSCA)}"
+                 aria-label="{html.escape(TEXTO_BUSCA)}">
+          <ul class="busca-sugestoes" id="busca-lista" hidden></ul>
+        </div>
+      </div>
+    </div>
+
+    <div class="area">
+      <section class="cartao cartao-mapa">
+        <div class="mapa-slot" id="slot-mapa"></div>
+        <div class="mapa-rodape" id="legenda-coropletico"></div>
+      </section>
+
+      <aside class="coluna-lateral">
+        <section class="cartao cartao-bandeiras">
+          <header class="cartao-topo">
+            <h2>Bandeiras</h2>
+            <div class="acoes">
+              <button type="button" id="acao-todas">Todas</button>
+              <button type="button" id="acao-nenhuma">Nenhuma</button>
+            </div>
+          </header>
+          <div class="cartao-conteudo" id="painel-bandeiras"></div>
+        </section>
+
+        <section class="cartao cartao-ranking">
+          <header class="cartao-topo">
+            <h2>Maior presença</h2>
+            <span class="cartao-nota" id="ranking-nota"></span>
+          </header>
+          <ol class="cartao-conteudo ranking" id="ranking-lista"></ol>
+        </section>
+      </aside>
+    </div>
+
+    <p class="app-rodape">{CREDITO_FONTES.format(data=config.DATA_DADOS)}</p>
+  </div>
+</div>
+"""
+    mapa.get_root().html.add_child(Element(moldura))
+
+
 # --------------------------------------------------------------------------- #
-# 4. Pontos já geocodificados
+# 5. Pontos já geocodificados
 # --------------------------------------------------------------------------- #
 
 
@@ -1284,7 +2208,7 @@ def carregar_pontos_geocodificados(
 
 
 # --------------------------------------------------------------------------- #
-# 5. Camadas de ponto em dois níveis
+# 6. Camadas de ponto em dois níveis
 # --------------------------------------------------------------------------- #
 
 
@@ -1370,7 +2294,7 @@ def _popup_ponto(linha: pd.Series) -> str:
         '<div class="popup-municipio">'
         f"<h4>{nome}</h4>"
         f"<div><b>{sub_categoria}</b> &middot; {tipo}</div>"
-        f'<div style="color:#6b7785">{instituicao}</div>'
+        f'<div class="popup-secundario">{instituicao}</div>'
         f"<div style='padding-top:5px'>{_texto_endereco(linha)}<br>{municipio}/{uf}</div>"
         f'<div class="{classe}" style="padding-top:6px">'
         f"Posição: {html.escape(descricao)}.</div>"
@@ -1587,16 +2511,18 @@ def adicionar_camadas_de_pontos(
 
 
 # --------------------------------------------------------------------------- #
-# 6. Mapa base e controle de camadas
+# 7. Mapa base e controle de camadas
 # --------------------------------------------------------------------------- #
 
 
 def criar_mapa_base() -> folium.Map:
     """Cria o mapa Folium centrado no Sul, no zoom inicial da configuração.
 
+    A folha de estilo NÃO entra aqui — ver `aplicar_folha_de_estilo`.
+
     Returns:
-        O `folium.Map`, já com a camada base, os dois panes próprios e o CSS do
-        painel e da legenda no ``<head>``.
+        O `folium.Map`, já com a camada base, os dois panes próprios e, no
+        ``<head>``, o título da aba e o ícone.
     """
     # `prefer_canvas` desenha os 7.600 marcadores num único canvas em vez de um
     # nó SVG por ponto. Sem cluster, todos existem no DOM ao mesmo tempo, e é
@@ -1625,7 +2551,18 @@ def criar_mapa_base() -> folium.Map:
         PANE_DIVISAS_UF, z_index=Z_INDEX_DIVISAS_UF, pointer_events=False
     ).add_to(mapa)
 
-    mapa.get_root().header.add_child(Element(_CSS_PAINEL))
+    raiz = mapa.get_root()
+    # O título da aba e o ícone: sem eles o navegador rotula o arquivo pelo
+    # caminho ("mapa_if_sul.html") e desenha a folha em branco padrão, o que
+    # entrega mal um material que circula com várias abas abertas.
+    raiz.title = TITULO_MAPA
+    raiz.header.add_child(
+        Element(
+            '<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,'
+            + _SVG_FAVICON.format(cor=COR_TURQUESA.lstrip("#"))
+            + '">'
+        )
+    )
     return mapa
 
 
@@ -1654,6 +2591,30 @@ _JS_CONTROLADOR = """
     if (!mapa || !geo || !controle) {
         console.error("controlador: mapa, camada de municípios ou painel não encontrados");
         return;
+    }
+
+    /* --------------------------------------------------------------------
+       Encaixe na moldura da página
+       --------------------------------------------------------------------
+
+       O mapa e o painel de camadas nascem soltos — o mapa como <div> no corpo
+       do documento, o painel como controle flutuante no canto do mapa — e são
+       movidos daqui para dentro dos cartões que `adicionar_moldura` desenhou.
+       Ver o docstring daquela função para por que o HTML não pode já nascer
+       assim. Este bloco roda durante a análise do documento, antes da primeira
+       pintura, então não há salto na tela.
+
+       Aqui só se MOVE. A remedição do tamanho fica para o fim do arquivo, em
+       `remedirEEnquadrar`, por um motivo medido: chamada aqui, ela lia
+       `clientWidth` zero e o mapa abria em zoom 20 sobre um ponto. */
+    var slotMapa = document.getElementById("slot-mapa");
+    if (slotMapa) {
+        slotMapa.appendChild(mapa.getContainer());
+    }
+    var caixaBandeiras = document.getElementById("painel-bandeiras");
+    var painelCamadas = controle.getContainer && controle.getContainer();
+    if (caixaBandeiras && painelCamadas) {
+        caixaBandeiras.appendChild(painelCamadas);
     }
 
     /* --- Estado da seleção, espelhando os dois níveis do painel --------- */
@@ -1769,36 +2730,35 @@ _JS_CONTROLADOR = """
         if (painelCoro) { painelCoro.style.pointerEvents = cidade ? "" : "none"; }
         if (!cidade && geo.getPopup()) { mapa.closePopup(geo.getPopup()); }
 
-        var legenda = document.getElementById("legenda-coropletico");
-        if (legenda) { legenda.style.display = cidade ? "" : "none"; }
+        /* A legenda NÃO some no modo de pontos: ela troca de assunto. A faixa
+           é o rodapé fixo do cartão do mapa, e escondê-la abriria um vão branco
+           embaixo dele; além disso continua havendo o que explicar naquele modo
+           — que ali cada disco é um ponto e a cor dele é a bandeira. */
+        desenharLegenda();
+        escreverDica();
 
         repintar();
     }
 
-    /* O painel é o dono das duas escolhas de escopo — o modo e o estado —,
-       então as duas caixas são inseridas na lista dele, antes das bandeiras. */
-    function listaDoPainel() {
-        var painel = controle.getContainer && controle.getContainer();
-        if (!painel) { return null; }
-        return painel.querySelector(".leaflet-control-layers-list") || painel;
+    /* Os dois seletores de escopo — o modo e o estado — já vêm no HTML,
+       montados por `_segmentos` na geração. O controlador não desenha mais
+       nenhum dos dois: ele só liga os ouvintes.
+
+       A troca não é de estilo. Enquanto as caixas eram INSERIDAS na lista do
+       `L.Control.Layers`, elas viviam dentro de um elemento que o Leaflet
+       reconstrói inteiro sempre que uma camada entra ou sai do mapa por fora
+       do painel — qualquer reconstrução dessas as apagaria, junto com os
+       ouvintes. Fora do painel, o problema deixa de existir. */
+    function escreverDica() {
+        var caixa = document.getElementById("dica-modo");
+        if (!caixa) { return; }
+        var escolhido = null;
+        cfg.modos.forEach(function (m) { if (m.id === modo) { escolhido = m; } });
+        caixa.textContent = escolhido ? escolhido.dica : "";
     }
 
-    function montarSeletorDeModo(lista) {
-        var caixa = L.DomUtil.create("div", "modo-visao");
-        var html = "";
-        cfg.modos.forEach(function (m) {
-            html += '<label><input type="radio" name="modo-visao" value="' +
-                m.id + '"' + (m.id === modo ? " checked" : "") + ">" +
-                m.rotulo + '<span class="modo-dica">' + m.dica + "</span></label>";
-        });
-        caixa.innerHTML = html;
-        lista.insertBefore(caixa, lista.firstChild);
-
-        /* Sem isto, clicar no seletor também chega ao mapa embaixo dele — o
-           que faz o mapa dar zoom no duplo clique e arrastar no drag. */
-        L.DomEvent.disableClickPropagation(caixa);
-
-        var opcoes = caixa.querySelectorAll("input");
+    function ligarSeletorDeModo() {
+        var opcoes = document.querySelectorAll('input[name="modo-visao"]');
         for (var i = 0; i < opcoes.length; i++) {
             opcoes[i].addEventListener("change", function () {
                 modo = this.value;
@@ -1878,11 +2838,38 @@ _JS_CONTROLADOR = """
         });
     }
 
+    /* --------------------------------------------------------------------
+       Todo enquadramento deste mapa é SEM ANIMAÇÃO
+       --------------------------------------------------------------------
+
+       Não é preferência de estilo: com o contêiner do mapa movido para dentro
+       do cartão (ver "Encaixe na moldura da página"), o voo animado do Leaflet
+       não CHEGA ao destino. A animação de zoom depende de um `transitionend`
+       no elemento-proxy que o Leaflet cria na inicialização, e reparentar o
+       contêiner deixa esse evento de chegar: o `fitBounds` animado sai do
+       lugar mas para no meio, num zoom que não é nem o de origem nem o de
+       destino.
+
+       Medido neste arquivo: abrindo, o mapa parava em zoom 6 sobre o centro do
+       construtor, com o RS e o PR cortados; clicando "SC", o enquadramento não
+       saía do lugar. Com `animate: false` os dois acertam o destino.
+
+       O salto seco também não é perda: as duas chamadas que enquadram trocam o
+       CONTEÚDO junto com o recorte — o filtro de estado apaga dois estados
+       inteiros, e a busca abre o balão do município. Voar sobre um mapa cujo
+       conteúdo mudou no primeiro quadro não informa nada. */
+    var ANIMAR_ENQUADRAMENTO = false;
+
     function enquadrar() {
         var limites = ufSelecionada
             ? cfg.limites[ufSelecionada]
             : cfg.limites.todos;
-        if (limites) { mapa.fitBounds(limites, {padding: [14, 14]}); }
+        if (limites) {
+            mapa.fitBounds(limites, {
+                padding: [14, 14],
+                animate: ANIMAR_ENQUADRAMENTO
+            });
+        }
     }
 
     function selecionarUf(uf) {
@@ -1894,22 +2881,8 @@ _JS_CONTROLADOR = """
         enquadrar();
     }
 
-    function montarFiltroDeUf(lista) {
-        var caixa = L.DomUtil.create("div", "filtro-uf");
-        var opcao = function (valor, rotulo) {
-            return '<label><input type="radio" name="filtro-uf" value="' +
-                valor + '"' + (valor ? "" : " checked") + ">" + rotulo +
-                "</label>";
-        };
-        var html = '<span class="filtro-titulo">Estado</span>' +
-            opcao("", "Todos");
-        cfg.ufs.forEach(function (uf) { html += opcao(uf, uf); });
-        caixa.innerHTML = html;
-        lista.insertBefore(caixa, lista.firstChild);
-
-        L.DomEvent.disableClickPropagation(caixa);
-
-        var opcoes = caixa.querySelectorAll("input");
+    function ligarFiltroDeUf() {
+        var opcoes = document.querySelectorAll('input[name="filtro-uf"]');
         for (var i = 0; i < opcoes.length; i++) {
             opcoes[i].addEventListener("change", function () {
                 selecionarUf(this.value);
@@ -1929,6 +2902,10 @@ _JS_CONTROLADOR = """
     var campoBusca = null;
     var listaBusca = null;
     var destacada = -1;
+
+    /* Os municípios atualmente listados no ranking, na ordem em que aparecem:
+       é por esta lista que o clique numa linha chega à camada do município. */
+    var ranking = [];
 
     /* Sem acento e sem caixa dos dois lados: é o que faz "sao lourenco" achar
        "São Lourenço do Sul" — ninguém digita o acento numa caixa de busca. */
@@ -2034,46 +3011,34 @@ _JS_CONTROLADOR = """
         geo.openPopup(centro);
     }
 
-    function irPara(item) {
+    /* Serve à busca e ao ranking, que pedem a mesma coisa: enquadrar um
+       município e explicá-lo. O que muda é `vindoDaBusca` — escrever o nome no
+       campo confirma o que o usuário acabou de escolher ali, mas depois de um
+       clique no ranking a mesma escrita pareceria uma busca que ele não fez. */
+    function irPara(item, vindoDaBusca) {
         if (!item) { return; }
         var limites = item.camada.getBounds();
-        mapa.fitBounds(limites, {maxZoom: cfg.zoomBusca, padding: [24, 24]});
+        mapa.fitBounds(limites, {
+            maxZoom: cfg.zoomBusca,
+            padding: [24, 24],
+            animate: ANIMAR_ENQUADRAMENTO
+        });
         /* O popup só faz sentido onde o polígono está pintado; no nível de
            pontos ele abriria sobre um mapa sem coroplético nenhum. */
         if (mostraCidade()) { abrirPopupMunicipio(item.camada, limites.getCenter()); }
-        campoBusca.value = item.nome;
+        if (vindoDaBusca && campoBusca) { campoBusca.value = item.nome; }
         fecharSugestoes();
     }
 
-    function montarBusca() {
-        var Busca = L.Control.extend({
-            options: {position: "topleft"},
-            onAdd: function () {
-                var caixa = L.DomUtil.create("div", "busca-municipio");
-                campoBusca = L.DomUtil.create("input", "", caixa);
-                campoBusca.type = "text";
-                campoBusca.placeholder = cfg.textoBusca;
-                campoBusca.setAttribute("autocomplete", "off");
-                campoBusca.setAttribute("aria-label", cfg.textoBusca);
-
-                listaBusca = L.DomUtil.create("ul", "busca-sugestoes", caixa);
-                listaBusca.hidden = true;
-
-                /* Sem isto o campo devolve tudo ao mapa embaixo dele: o duplo
-                   clique dá zoom, arrastar move o mapa, e cada tecla chega aos
-                   atalhos do Leaflet — "+" e "-" dariam zoom no meio da
-                   palavra digitada. */
-                L.DomEvent.disableClickPropagation(caixa);
-                L.DomEvent.disableScrollPropagation(caixa);
-                L.DomEvent.on(
-                    campoBusca,
-                    "keydown keyup keypress",
-                    L.DomEvent.stopPropagation
-                );
-                return caixa;
-            }
-        });
-        mapa.addControl(new Busca());
+    /* O campo vive na barra de controles, fora do mapa — e não mais como
+       `L.Control` flutuante sobre ele. Além de tirar do mapa uma caixa que
+       tapava municípios, isso dispensa os três `L.DomEvent` que existiam só
+       para impedir que o clique, a rolagem e cada tecla digitada chegassem ao
+       Leaflet embaixo: fora do contêiner do mapa, não há o que interceptar. */
+    function ligarBusca() {
+        campoBusca = document.getElementById("busca-campo");
+        listaBusca = document.getElementById("busca-lista");
+        if (!campoBusca || !listaBusca) { return; }
 
         campoBusca.addEventListener("input", atualizarBusca);
         campoBusca.addEventListener("focus", atualizarBusca);
@@ -2087,7 +3052,7 @@ _JS_CONTROLADOR = """
             } else if (e.key === "Enter") {
                 /* Sem nenhuma destacada, Enter leva à primeira: é o resultado
                    que o usuário está olhando. */
-                irPara(sugestoes[destacada < 0 ? 0 : destacada]);
+                irPara(sugestoes[destacada < 0 ? 0 : destacada], true);
                 e.preventDefault();
             } else if (e.key === "Escape") {
                 fecharSugestoes();
@@ -2096,15 +3061,18 @@ _JS_CONTROLADOR = """
 
         listaBusca.addEventListener("click", function (e) {
             var linha = e.target.closest("li[data-i]");
-            if (linha) { irPara(sugestoes[Number(linha.getAttribute("data-i"))]); }
+            if (linha) {
+                irPara(sugestoes[Number(linha.getAttribute("data-i"))], true);
+            }
         });
         listaBusca.addEventListener("mousemove", function (e) {
             var linha = e.target.closest("li[data-i]");
             if (linha) { destacar(Number(linha.getAttribute("data-i"))); }
         });
 
-        /* Clique fora fecha a lista. Clique DENTRO da caixa não chega aqui —
-           `disableClickPropagation` o interrompe antes. */
+        /* Clique fora fecha a lista. O teste é pela caixa que embrulha campo e
+           sugestões, e não pelo campo: clicar numa sugestão é clicar fora do
+           <input>, e fechar a lista ali cancelaria a própria escolha. */
         document.addEventListener("click", function (e) {
             if (campoBusca && !campoBusca.parentNode.contains(e.target)) {
                 fecharSugestoes();
@@ -2112,7 +3080,35 @@ _JS_CONTROLADOR = """
         });
     }
 
-    var atual = {sel: [], cortes: [], cores: [], max: 0};
+    /* Uma linha do ranking leva ao mesmo lugar que uma sugestão da busca. */
+    function ligarRanking() {
+        var el = document.getElementById("ranking-lista");
+        if (!el) { return; }
+        el.addEventListener("click", function (e) {
+            var linha = e.target.closest("li[data-i]");
+            if (linha) {
+                irPara(ranking[Number(linha.getAttribute("data-i"))], false);
+            }
+        });
+    }
+
+    var atual = {sel: [], cortes: [], cores: [], max: 0, valores: []};
+
+    function formatarNumero(n) {
+        return Number(n).toLocaleString("pt-BR");
+    }
+
+    /* Números grandes abreviados nos indicadores: "1,4 mi" cabe no cartão e é
+       lido de relance; "1.412.883" ocupa a largura toda e não é lido — ninguém
+       decide nada com o dígito da unidade de uma população. A contagem exata
+       continua disponível no balão de cada município. */
+    function formatarCompacto(n) {
+        if (n >= 1000000) {
+            return (n / 1000000).toFixed(1).replace(".", ",") + " mi";
+        }
+        if (n >= 10000) { return formatarNumero(Math.round(n / 1000)) + " mil"; }
+        return formatarNumero(n);
+    }
 
     function totalDe(props) {
         var t = 0;
@@ -2238,26 +3234,47 @@ _JS_CONTROLADOR = """
         return atual.sel.length + " bandeiras";
     }
 
-    function desenharLegenda(valores) {
+    /* A legenda é uma FAIXA HORIZONTAL no rodapé do cartão do mapa, e não uma
+       caixa flutuante sobre ele. Flutuando, ela tapava município — e num mapa
+       cujas classes são recalculadas a cada clique a legenda faz parte da
+       leitura, não pode estar por cima do que descreve.
+
+       Ela também não fica vazia em nenhum estado: sem bandeira marcada diz o
+       que fazer, e no modo de pontos explica a codificação dos discos, que é o
+       que está na tela ali. */
+    function desenharLegenda() {
         var el = document.getElementById("legenda-coropletico");
         if (!el) { return; }
 
-        if (!atual.sel.length) {
-            el.innerHTML = "<h4>Nenhuma bandeira marcada</h4>" +
-                '<p class="legenda-sub">Marque uma camada no painel à direita ' +
-                "para colorir o mapa.</p>";
+        var fonte = '<span class="legenda-fonte">' + cfg.creditoLegenda + "</span>";
+        var escopo = ufSelecionada ? (" &middot; " + ufSelecionada) : "";
+
+        if (!mostraCidade()) {
+            el.innerHTML = '<span class="legenda-titulo">Pontos de atendimento' +
+                "<span>" + escopo + "</span></span>" +
+                '<span class="legenda-recado">Um disco por ponto; a cor é a ' +
+                "bandeira, na mesma amostra da lista ao lado. Aproxime o zoom " +
+                "para abrir os balões de contagem.</span>" + fonte;
             return;
         }
 
-        var soma = 0, nZero = 0;
+        if (!atual.sel.length) {
+            el.innerHTML = '<span class="legenda-titulo">Nenhuma bandeira ' +
+                "marcada</span>" +
+                '<span class="legenda-recado">Marque uma bandeira na lista ao ' +
+                "lado para colorir o mapa.</span>" + fonte;
+            return;
+        }
+
+        var valores = atual.valores;
+        var nZero = 0;
         for (var i = 0; i < valores.length; i++) {
-            soma += valores[i];
             if (valores[i] === 0) { nZero++; }
         }
 
-        var linhas = '<tr><td><span class="amostra" style="background:' +
-            cfg.corZero + '"></span></td><td>0</td>' +
-            '<td class="n-municipios">' + nZero + " mun.</td></tr>";
+        var classes = '<span class="legenda-classe zero"><i style="background:' +
+            cfg.corZero + '"></i><b>0</b><small>' + formatarNumero(nZero) +
+            " mun.</small></span>";
 
         for (var c = 0; c < atual.cortes.length; c++) {
             var lo = atual.cortes[c];
@@ -2265,41 +3282,167 @@ _JS_CONTROLADOR = """
             var hi = ultimo ? null : atual.cortes[c + 1] - 1;
             var rotulo;
             if (ultimo) {
-                rotulo = (lo >= atual.max) ? String(lo) : (lo + " ou mais");
+                rotulo = (lo >= atual.max) ? String(lo) : (lo + "+");
             } else {
-                rotulo = (hi > lo) ? (lo + " a " + hi) : String(lo);
+                rotulo = (hi > lo) ? (lo + "\u2013" + hi) : String(lo);
             }
             var n = 0;
             for (var j = 0; j < valores.length; j++) {
                 if (valores[j] >= lo && (ultimo || valores[j] <= hi)) { n++; }
             }
-            linhas += '<tr><td><span class="amostra" style="background:' +
-                atual.cores[c] + '"></span></td><td>' + rotulo + "</td>" +
-                '<td class="n-municipios">' + n + " mun.</td></tr>";
+            classes += '<span class="legenda-classe"><i style="background:' +
+                atual.cores[c] + '"></i><b>' + rotulo + "</b><small>" +
+                formatarNumero(n) + " mun.</small></span>";
         }
 
-        el.innerHTML = "<h4>" + rotuloSelecao() +
-            (ufSelecionada ? " &middot; " + ufSelecionada : "") + "</h4>" +
-            '<p class="legenda-sub">pontos de atendimento por município' +
-            " &middot; " + soma.toLocaleString("pt-BR") + " no total</p>" +
-            "<table>" + linhas + "</table>";
+        el.innerHTML = '<span class="legenda-titulo">Pontos por município' +
+            "<span> &middot; " + rotuloSelecao() + escopo + "</span></span>" +
+            '<span class="legenda-escala">' + classes + "</span>" + fonte;
     }
 
+    /* --------------------------------------------------------------------
+       Indicadores e ranking
+       --------------------------------------------------------------------
+
+       Os dois respondem à MESMA seleção que colore o mapa, e é isso que os
+       torna úteis a quem decide: o coroplético mostra o desenho da rede, os
+       quatro números dizem o tamanho dela, e a lista diz onde ela se
+       concentra. Nenhum dos três é lido sozinho.
+
+       Os dois indicadores de lacuna — municípios sem nenhum ponto da seleção e
+       a população que mora neles — são o motivo de a faixa existir. "347
+       municípios descobertos" só vira pauta quando vem acompanhado de quanta
+       gente isso é. */
+    function atualizarIndicadores(resumo) {
+        var escrever = function (id, valor, nota) {
+            var alvo = document.getElementById(id);
+            if (alvo) { alvo.textContent = valor; }
+            var rodape = document.getElementById(id + "-nota");
+            if (rodape) {
+                rodape.textContent = nota;
+                /* A nota é cortada com reticências quando o cartão aperta; o
+                   `title` é o que a devolve inteira ao passar o mouse. */
+                rodape.title = nota;
+            }
+        };
+        var escopo = ufSelecionada ? (" \u00b7 " + ufSelecionada) : "";
+        var total = resumo.municipios || 1;
+        var pctAtendidos = Math.round(resumo.atendidos * 100 / total);
+        var pctVazios = Math.round(resumo.semPonto * 100 / total);
+
+        escrever("kpi-pontos", formatarNumero(resumo.pontos),
+                 rotuloSelecao() + escopo);
+        escrever("kpi-municipios", formatarNumero(resumo.atendidos),
+                 pctAtendidos + "% de " + formatarNumero(resumo.municipios));
+        escrever("kpi-vazios", formatarNumero(resumo.semPonto),
+                 pctVazios + "% de " + formatarNumero(resumo.municipios));
+        /* A população sem dado é declarada, e não somada como zero: o IBGE não
+           devolve estimativa para alguns municípios, e engolir isso faria o
+           indicador subestimar a lacuna sem avisar. */
+        escrever("kpi-populacao", formatarCompacto(resumo.popSemPonto),
+                 resumo.popSemDado
+                     ? "sem estimativa em " + resumo.popSemDado
+                     : "nesses " + formatarNumero(resumo.semPonto) +
+                       " municípios");
+    }
+
+    function desenharRanking(lista) {
+        var el = document.getElementById("ranking-lista");
+        var nota = document.getElementById("ranking-nota");
+        if (!el) { return; }
+
+        ranking = lista.sort(function (a, b) { return b.total - a.total; })
+                       .slice(0, cfg.maxRanking);
+        el.innerHTML = "";
+        if (nota) {
+            nota.textContent = ranking.length
+                ? ("top " + ranking.length + (ufSelecionada ? " \u00b7 " + ufSelecionada : ""))
+                : "";
+        }
+        if (!ranking.length) {
+            var vazio = L.DomUtil.create("li", "vazio", el);
+            vazio.textContent = "Nenhum município com ponto nesta seleção.";
+            return;
+        }
+
+        var teto = ranking[0].total;
+        ranking.forEach(function (item, i) {
+            var linha = L.DomUtil.create("li", "", el);
+            linha.setAttribute("data-i", String(i));
+            linha.title = "Enquadrar " + item.nome + " no mapa";
+
+            var posicao = L.DomUtil.create("span", "posicao", linha);
+            posicao.textContent = String(i + 1);
+
+            /* `textContent`, e não `innerHTML`: o nome vem do dado. */
+            var nome = L.DomUtil.create("span", "nome", linha);
+            nome.textContent = item.nome + " ";
+            var uf = L.DomUtil.create("em", "", nome);
+            uf.textContent = item.uf;
+
+            var valor = L.DomUtil.create("span", "valor", linha);
+            valor.textContent = formatarNumero(item.total);
+
+            /* A barra é proporcional ao PRIMEIRO colocado, não ao total: o que
+               a lista responde é "quão longe do maior", e nenhuma capital passa
+               de uns poucos por cento do total do recorte — barras medidas
+               contra ele seriam todas invisíveis. */
+            var trilho = L.DomUtil.create("span", "trilho", linha);
+            var barra = L.DomUtil.create("i", "", trilho);
+            barra.style.width =
+                Math.max(2, Math.round(item.total * 100 / teto)) + "%";
+        });
+    }
+
+    /* Uma única varredura dos 1.191 municípios alimenta as quatro leituras —
+       a escala de cores, a legenda, os indicadores e o ranking. Elas descrevem
+       exatamente o mesmo recorte, então varrer quatro vezes só abriria espaço
+       para as quatro discordarem entre si. */
     function recalcular() {
         atual.sel = selecao();
 
         var valores = [];
+        var comPontos = [];
+        var resumo = {
+            municipios: 0,
+            pontos: 0,
+            atendidos: 0,
+            semPonto: 0,
+            popSemPonto: 0,
+            popSemDado: 0
+        };
         atual.max = 0;
         geo.eachLayer(function (camada) {
-            var t = totalDe(camada.feature.properties);
+            var props = camada.feature.properties;
+            var t = totalDe(props);
             camada.feature.__total = t;
-            /* As classes e a legenda descrevem o que está NA TELA: município
-               fora do recorte não entra na escala nem na contagem. */
-            if (!dentroDoRecorte(camada.feature.properties)) { return; }
+            /* As classes, a legenda e os indicadores descrevem o que está NA
+               TELA: município fora do recorte não entra em nenhum dos três. */
+            if (!dentroDoRecorte(props)) { return; }
             if (t > atual.max) { atual.max = t; }
             valores.push(t);
+
+            resumo.municipios++;
+            resumo.pontos += t;
+            if (t > 0) {
+                resumo.atendidos++;
+                comPontos.push({
+                    nome: String(props.municipio_nome),
+                    uf: props.uf,
+                    total: t,
+                    camada: camada
+                });
+            } else {
+                resumo.semPonto++;
+                if (props.populacao_valor == null) {
+                    resumo.popSemDado++;
+                } else {
+                    resumo.popSemPonto += props.populacao_valor;
+                }
+            }
         });
 
+        atual.valores = valores;
         atual.cortes = calcularCortes(valores);
         var rampa = (atual.sel.length === 1 && cfg.rampas[atual.sel[0].rotulo])
             ? cfg.rampas[atual.sel[0].rotulo]
@@ -2307,7 +3450,9 @@ _JS_CONTROLADOR = """
         atual.cores = amostrar(rampa, atual.cortes.length);
 
         repintar();
-        desenharLegenda(valores);
+        desenharLegenda();
+        atualizarIndicadores(resumo);
+        desenharRanking(comPontos);
     }
 
     /* --- Popup e tooltip ganham o total da seleção atual ---------------- */
@@ -2425,24 +3570,119 @@ _JS_CONTROLADOR = """
         });
     });
 
+    /* Com 14 bandeiras, isolar uma custava 13 cliques para desmarcar as
+       outras, e voltar ao total custava os mesmos 13 de volta. Os dois botões
+       fazem as duas coisas numa passada.
+
+       Eles escrevem nas caixas e chamam `_onInputClick` — o mesmo caminho de um
+       clique de verdade no painel —, e não `addLayer`/`removeLayer`: mexer nas
+       camadas por fora faria o `L.Control.Layers` se reconstruir. */
+    function ligarAcoesDeSelecao() {
+        var aplicar = function (ligar) {
+            caixas.forEach(function (c) {
+                c.grupo.checked = ligar;
+                c.filhas.forEach(function (filha) { filha.checked = ligar; });
+            });
+            if (controle && controle._onInputClick) { controle._onInputClick(); }
+            atualizarParciais();
+        };
+        var todas = document.getElementById("acao-todas");
+        var nenhuma = document.getElementById("acao-nenhuma");
+        if (todas) {
+            todas.addEventListener("click", function () { aplicar(true); });
+        }
+        if (nenhuma) {
+            nenhuma.addEventListener("click", function () { aplicar(false); });
+        }
+    }
+
     atualizarParciais();
     atualizarContagens();
 
-    var lista = listaDoPainel();
-    if (lista) {
-        /* Cada um entra como PRIMEIRO filho da lista, então a ordem de chamada
-           é a inversa da que aparece na tela: o modo, chamado por último, fica
-           em cima do filtro de estado. */
-        montarFiltroDeUf(lista);
-        montarSeletorDeModo(lista);
-    }
+    ligarSeletorDeModo();
+    ligarFiltroDeUf();
+    ligarAcoesDeSelecao();
 
     montarIndice();
-    montarBusca();
+    ligarBusca();
+    ligarRanking();
     recalcular();
     aplicarModo();
+
+    /* --------------------------------------------------------------------
+       Remedir e enquadrar, depois de a moldura estar pronta
+       --------------------------------------------------------------------
+
+       O `invalidateSize` é obrigatório porque o Leaflet mede o contêiner uma
+       única vez, no `L.map(...)`, e ali ele ainda ocupava a janela inteira —
+       sem remedir, o mapa seguiria calculando ladrilhos, enquadramento e
+       cliques para um retângulo do tamanho da tela dentro de um cartão bem
+       menor.
+
+       Ele vem AQUI, e não junto do encaixe lá em cima, porque a essa altura o
+       cartão já tem a altura definitiva: a legenda do rodapé, que divide o
+       cartão com o mapa, acabou de ser escrita. Medido antes, o Leaflet lia
+       largura zero e o mapa abria em zoom 20 sobre um ponto.
+
+       E o enquadramento de abertura é CALCULADO, não o par centro/zoom do
+       construtor: aquele foi medido com o mapa ocupando a janela inteira, e
+       dentro do cartão o mesmo zoom cortaria o RS e o PR. `fitBounds` sobre o
+       recorte inteiro acerta em qualquer proporção de tela — que é o que um
+       arquivo aberto ora no notebook, ora no projetor, precisa.
+
+       A repetição no `load` é a garantia de que a medida final vale: este
+       bloco roda com o documento ainda em análise, e qualquer coisa que mude a
+       caixa depois (a barra de rolagem aparecendo, uma fonte trocando de
+       métrica) deixaria o mapa desalinhado até o primeiro zoom. */
+    function remedirEEnquadrar() {
+        mapa.invalidateSize();
+        enquadrar();
+    }
+
+    remedirEEnquadrar();
+    window.addEventListener("load", remedirEEnquadrar);
 })();
 """
+
+
+class _FolhaDeEstilo(MacroElement):
+    """Envelope que emite a folha de estilo no FIM do ``<head>``.
+
+    Existe pelo mesmo motivo que `_ControladorReativo`, um andar acima: por
+    causa da ORDEM. O folium carrega, sem ser perguntado, o Bootstrap, o
+    FontAwesome, o leaflet.css e o MarkerCluster.Default.css — e várias regras
+    deles colidem com as daqui: o Bootstrap redefine a fonte do ``<body>``, o
+    MarkerCluster pinta o balão de contagem de verde-amarelo-laranja. Em
+    empate de especificidade, quem vem depois vence.
+
+    Adicionada a ``get_root().header`` na construção, a folha sairia ANTES de
+    todas essas — os elementos criados durante a renderização são anexados ao
+    cabeçalho depois dos que já estavam lá — e perderia todos os empates. Como
+    `MacroElement` filho do mapa, adicionado por último, ela sai por último e
+    ganha todos.
+    """
+
+    _template = Template(
+        "{% macro header(this, kwargs) %}{{ this.css | safe }}{% endmacro %}"
+    )
+
+    def __init__(self, css: str):
+        super().__init__()
+        self._name = "FolhaDeEstilo"
+        self.css = css
+
+
+def aplicar_folha_de_estilo(mapa: folium.Map) -> None:
+    """Acrescenta a folha de estilo da página, para sair por último no ``<head>``.
+
+    Tem de ser a ÚLTIMA coisa adicionada ao mapa — ver `_FolhaDeEstilo` para o
+    porquê.
+
+    Args:
+        mapa: mapa com todas as camadas, o painel e o controlador já
+            adicionados.
+    """
+    mapa.add_child(_FolhaDeEstilo(_CSS_PAGINA))
 
 
 class _ControladorReativo(MacroElement):
@@ -2557,6 +3797,11 @@ def adicionar_controle_reativo(
         "minBusca": MIN_CARACTERES_BUSCA,
         "maxSugestoes": MAX_SUGESTOES_BUSCA,
         "zoomBusca": ZOOM_BUSCA,
+        "maxRanking": MAX_RANKING,
+        # O crédito repetido na faixa da legenda: quem recorta a imagem do mapa
+        # para um slide leva a fonte e a safra junto, sem precisar do rodapé da
+        # página.
+        "creditoLegenda": f"BACEN &middot; {config.DATA_DADOS}",
     }
 
     script = (
@@ -2610,11 +3855,13 @@ def gera_mapa(
        município (nome, população — ou "dado indisponível" —, total de bancos,
        total de pontos de cooperativas e o detalhamento por `sub_categoria`),
        e por cima dele a divisa entre estados, dissolvida da mesma malha;
-    4. adiciona a legenda discreta do coroplético;
+    4. adiciona a moldura da página — marca, título, indicadores, barra de
+       controles, cartões e rodapé de fontes;
     5. lê os pontos já geocodificados por `src.cnefe` e monta as camadas em
        dois níveis (grupo pai por `categoria_if`, subgrupo por
        `sub_categoria`);
-    6. adiciona o `LayerControl` aberto e grava o HTML.
+    6. adiciona o `LayerControl` aberto, o controlador reativo e a folha de
+       estilo (nesta ordem, que é obrigatória), e grava o HTML.
 
     Args:
         caminho_agregado: GeoParquet de `src.agregacao`.
@@ -2635,7 +3882,7 @@ def gera_mapa(
     com_textos = preparar_textos_municipio(agregado)
     coropletico = adicionar_coropletico(mapa, com_textos)
     divisas = adicionar_divisas_uf(mapa, agregado)
-    adicionar_legenda(mapa)
+    adicionar_moldura(mapa, agregado)
 
     estrutura = adicionar_camadas_de_pontos(mapa, localizados)
 
@@ -2646,6 +3893,9 @@ def gera_mapa(
     adicionar_controle_reativo(
         mapa, coropletico, divisas, estrutura, controle, agregado
     )
+    # E a folha de estilo depois de tudo, para vencer o Bootstrap e o
+    # MarkerCluster que o folium carrega sozinho — ver `_FolhaDeEstilo`.
+    aplicar_folha_de_estilo(mapa)
 
     destino.parent.mkdir(parents=True, exist_ok=True)
     mapa.save(str(destino))

@@ -28,6 +28,14 @@ CRS_GEOGRAFICO = "EPSG:4326"
 ARQUIVO_AGENCIAS = RAW_DIR / "202606AGENCIAS.xlsx"
 ARQUIVO_POSTOS = RAW_DIR / "202606POSTOS.xlsx"
 
+#: Safra dos dados do BACEN, no formato em que ela é EXIBIDA (mês/ano).
+#:
+#: Vive aqui, ao lado dos arquivos de onde ela sai, para que o cabeçalho do
+#: mapa e o crédito de fontes não precisem repetir a data por conta própria:
+#: trocar de safra é trocar os dois arquivos acima e esta linha, e a página
+#: inteira acompanha. Ver `src.mapa.adicionar_moldura`.
+DATA_DADOS = "06/2026"
+
 # Nas duas planilhas as linhas 1-9 (1-based) são cabeçalho institucional do
 # BACEN; o cabeçalho real das colunas está na linha 10, ou seja, índice 9
 # zero-based — que é exatamente o valor esperado por `pandas.read_excel(header=)`.
