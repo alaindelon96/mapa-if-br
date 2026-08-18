@@ -10,13 +10,20 @@ Ordem das etapas, com o artefato que cada uma grava:
    -> ``data/raw/malha_municipios_sul.geojson`` (reaproveitada do cache)
 3. `agregacao`  — junta os dois pelo código IBGE, uma linha por município
    -> ``data/processed/agregado_municipio.parquet``
-4. `mapa`       — coroplético por município + camadas de ponto em dois níveis
+4. `cnefe`      — resolve a coordenada de cada ponto de atendimento contra o
+   Cadastro Nacional de Endereços do Censo 2022
+   -> ``data/processed/pontos_geocodificados.parquet``
+5. `mapa`       — coroplético por município + camadas de ponto em dois níveis
    -> ``output/mapa_if_sul.html``
 
 Cada etapa também roda sozinha (``python -m src.etl_bacen``, ``-m src.agregacao``,
-``-m src.mapa``), o que é o caminho normal durante o desenvolvimento. Este
-módulo existe para a execução de ponta a ponta, via ``python main.py`` ou
-``python -m src.pipeline``.
+``-m src.cnefe``, ``-m src.mapa``), o que é o caminho normal durante o
+desenvolvimento. Este módulo existe para a execução de ponta a ponta, via
+``python main.py`` ou ``python -m src.pipeline``.
+
+A etapa 4 depende de ~580 MB de arquivos do CNEFE em ``data/raw/cnefe/``. Eles
+são baixados na primeira execução e reaproveitados em todas as seguintes — o
+CNEFE é um produto do Censo 2022 e não muda.
 
 Por que a malha é uma etapa explícita aqui, se `agregacao.executar` já sabe
 buscá-la sozinha: assim ela é baixada/carregada UMA vez e passada adiante, o
@@ -39,12 +46,12 @@ from pathlib import Path
 
 import geopandas as gpd
 
-from src import agregacao, config, etl_bacen, ibge_malha, mapa
+from src import agregacao, cnefe, config, etl_bacen, ibge_malha, mapa
 
 _LOGGER = logging.getLogger(__name__)
 
-#: Quantidade de etapas, só para numerar os cabeçalhos ("ETAPA 2/4").
-TOTAL_ETAPAS = 4
+#: Quantidade de etapas, só para numerar os cabeçalhos ("ETAPA 2/5").
+TOTAL_ETAPAS = 5
 
 
 def _abrir_etapa(numero: int, titulo: str) -> float:
@@ -86,7 +93,7 @@ def _imprimir_tempos(duracoes: dict[str, float], total: float) -> None:
 def executar(usar_cache_malha: bool = True) -> Path:
     """Roda o pipeline completo e devolve o caminho do mapa gerado.
 
-    Encadeia as quatro etapas descritas no topo do módulo, na ordem, imprimindo
+    Encadeia as cinco etapas descritas no topo do módulo, na ordem, imprimindo
     o relatório de cada uma. A cadeia é sequencial de verdade: cada etapa lê o
     artefato que a anterior gravou, então rodar tudo de uma vez é a única forma
     de garantir que os quatro arquivos são da mesma safra — é exatamente isso
@@ -123,9 +130,13 @@ def executar(usar_cache_malha: bool = True) -> Path:
     agregacao.executar(malha=malha)
     duracoes["3. Agregação"] = time.perf_counter() - marco
 
-    marco = _abrir_etapa(4, "Mapa interativo")
+    marco = _abrir_etapa(4, "Geocodificação dos pontos pelo CNEFE")
+    cnefe.executar(usar_cache=True)
+    duracoes["4. Geocodificação"] = time.perf_counter() - marco
+
+    marco = _abrir_etapa(5, "Mapa interativo")
     destino = mapa.gera_mapa()
-    duracoes["4. Mapa"] = time.perf_counter() - marco
+    duracoes["5. Mapa"] = time.perf_counter() - marco
 
     print()
     _imprimir_tempos(duracoes, time.perf_counter() - inicio)

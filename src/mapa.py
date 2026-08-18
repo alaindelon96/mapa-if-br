@@ -7,7 +7,8 @@ do mesmo recorte:
   atendimento (agências + postos), lido de
   ``data/processed/agregado_municipio.parquet``;
 * uma **camada de pontos em dois níveis**, lida de
-  ``data/processed/if_sul_categorizado.parquet``, com um ponto por atendimento.
+  ``data/processed/pontos_geocodificados.parquet``, com um ponto por
+  atendimento, cada um na coordenada que `src.cnefe` resolveu para ele.
 
 O coroplético é **reativo**: ele mostra sempre o total das bandeiras marcadas no
 painel de camadas, e se repinta a cada clique. Ver "Coroplético reativo" abaixo.
@@ -23,56 +24,109 @@ Por que as camadas de ponto são hierárquicas (e não uma lista plana)
 --------------------------------------------------------------------------
 
 Uma lista plana de 14 camadas obrigaria 14 cliques para esconder "todos os
-bancos". A estrutura aqui é de dois níveis, com
-`folium.plugins.FeatureGroupSubGroup`:
+bancos". A estrutura aqui é de dois níveis, montada com `folium.FeatureGroup`:
 
-* **Nível 1 — grupo pai**: um `MarkerCluster` por `categoria_if` ("Bancos" e
-  "Cooperativas"). É o toggle principal: desmarcá-lo no `LayerControl` remove o
-  grupo inteiro do mapa de uma vez, com todos os pontos que estão nele.
-* **Nível 2 — subgrupo**: um `FeatureGroupSubGroup` por `sub_categoria`
-  (Sicredi, Sicoob, ... / Banco do Brasil, Bradesco, ...), preso ao pai. Cada um
-  aparece como um toggle próprio, indentado sob o pai, e liga/desliga só a sua
-  bandeira.
-
-O agrupamento (clustering) acontece no PAI, não no subgrupo. É o que o
-`Leaflet.FeatureGroup.SubGroup` faz: o subgrupo não desenha nada por conta
-própria, ele empresta seus marcadores ao grupo pai. A consequência é
-justamente a desejada — os pontos de Sicredi e Sicoob que estão na mesma cidade
-entram no MESMO balão de contagem, em vez de virarem dois balões sobrepostos no
-mesmo pixel, que é o que sairia se cada bandeira tivesse o seu próprio
-`MarkerCluster` independente.
+* **Nível 1 — grupo pai**: um por `categoria_if` ("Bancos" e "Cooperativas").
+  É o toggle principal e não desenha nada por conta própria: quem o marca ou
+  desmarca no painel arrasta junto todas as bandeiras da categoria, pela
+  cascata em `_JS_CONTROLADOR`.
+* **Nível 2 — subgrupo**: um por `sub_categoria` (Sicredi, Sicoob, ... / Banco
+  do Brasil, Bradesco, ...), com os marcadores daquela bandeira. Aparece como
+  um toggle próprio, indentado sob o pai.
 
 --------------------------------------------------------------------------
-Por que os marcadores ficam no polígono do município
+Agrupamento: balão de contagem longe, marcador individual perto
 --------------------------------------------------------------------------
 
-DECISÃO (acordada antes da implementação): os marcadores são posicionados no
-**ponto representativo do polígono do município**, não no endereço do ponto de
-atendimento. As planilhas do BACEN não publicam lat/lon, e a alternativa —
-geocodificar os 7.600 endereços via Nominatim/OSM — foi descartada por três
-motivos, nesta ordem:
+Os pontos são agrupados por `MarkerCluster`: no zoom de região, um balão com a
+contagem no lugar de dezenas de discos sobrepostos; conforme se aproxima, os
+balões se partem em balões menores, e a partir de `ZOOM_SEM_CLUSTER` cada ponto
+vira um marcador próprio.
 
-1. o endereço publicado não é geocodificável com confiança: vem abreviado e sem
-   separador ("PCA.TIRADENTES,410", "R.GAL.SAMPAIO,99"), sem bairro e com CEP
-   em 0% das linhas;
-2. o acerto parcial seria pior que o acerto nenhum — parte dos pontos ficaria no
-   endereço exato e parte cairia no fallback do município, produzindo um mapa de
-   precisão MISTA, em que o leitor não tem como saber qual é qual;
-3. 7.600 consultas a 1 req/s (limite do Nominatim) são ~2h07m por execução fria,
-   para um dado que o resto do pipeline já trata em nível de município — o join
-   de `src.agregacao` é por código IBGE, não espacial.
+O que NÃO existe mais é o *spiderfy* — o leque com uma linha ligando cada ponto
+ao centro do balão. Ele era necessário enquanto todos os pontos de um município
+ficavam na MESMA coordenada: sem abrir o leque, não havia como clicar em nada.
+Agora que `src.cnefe` dá coordenada própria a cada ponto, aproximar o zoom já
+separa os marcadores no lugar onde eles realmente estão, que é uma informação
+melhor do que a ordem arbitrária das pernas do leque.
 
-Consequências que o código assume explicitamente:
+Por isso `disableClusteringAtZoom` é obrigatório aqui, e não um refinamento:
+com o spiderfy desligado, um balão que sobrevivesse até o zoom máximo seria um
+beco sem saída — os pontos dentro dele não teriam como ser abertos. Desligar o
+agrupamento a partir de um zoom garante que todo ponto é alcançável.
 
-* usa-se `representative_point()`, e não `centroid`: em município de forma
-  irregular ou recortado pela costa o centroide pode cair FORA do próprio
-  polígono, e o marcador apareceria no mar ou na cidade vizinha;
-* **não há jitter**: todos os pontos de um mesmo município ficam exatamente na
-  mesma coordenada. É deliberado — um deslocamento aleatório inventaria uma
-  precisão que o dado não tem. A sobreposição não atrapalha porque o
-  `MarkerCluster` abre os coincidentes em leque (*spiderfy*) ao clique;
-* todo popup de marcador carrega o aviso de posição aproximada. O endereço real
-  vai no popup como TEXTO, que é o nível de precisão que a fonte permite.
+O mapa é criado com ``prefer_canvas=True``: nos zoons sem agrupamento os 7.600
+marcadores são desenhados num único elemento *canvas* em vez de 7.600 nós SVG,
+que é o que mantém a navegação fluida.
+
+Os poucos pontos que ainda caem na mesma coordenada exata (dois atendimentos no
+mesmo endereço, ou o fallback de município) são abertos num leque determinístico
+por `cnefe.desempatar_coincidentes`, com raio sempre menor que a incerteza do
+nível de precisão que o ponto declara.
+
+--------------------------------------------------------------------------
+Modo de visão: município OU ponto de atendimento
+--------------------------------------------------------------------------
+
+O topo do painel traz um seletor com as duas leituras do mesmo recorte
+(`MODOS_VISAO`): **nível cidade**, só os polígonos, e **nível pontos de
+atendimento**, só os marcadores. O mapa abre em `MODO_INICIAL`.
+
+O que o modo NÃO faz é mexer na seleção de bandeiras. As duas leituras são da
+mesma seleção, com efeitos diferentes: no nível cidade as bandeiras marcadas
+decidem a COR dos municípios, no nível de pontos decidem QUAIS marcadores
+aparecem. Por isso a lista de bandeiras continua ativa nos dois modos, e trocar
+de modo preserva o que estava marcado.
+
+A troca é feita escondendo *panes* do Leaflet, e não adicionando e removendo
+camadas — a diferença é de correção, não de estilo, e está explicada em
+`_JS_CONTROLADOR`: mexer nas camadas por fora do painel faz o `L.Control.Layers`
+se reconstruir e recopiar cada caixa de seleção da presença da camada no mapa,
+o que desmarcava as 14 bandeiras ao entrar no modo cidade. Para que o
+coroplético possa ser escondido sem levar os marcadores junto, ele recebe um
+pane próprio — por padrão os dois desenhariam no mesmo ``overlayPane`` e, com
+`prefer_canvas`, no mesmo ``<canvas>``.
+
+--------------------------------------------------------------------------
+Cor do marcador: a bandeira, e não a categoria
+--------------------------------------------------------------------------
+
+Cada ponto é pintado com a cor de marca da sua bandeira (`CORES_BANDEIRA`) —
+Sicredi verde, Caixa azul, Bradesco vermelho —, com o contorno derivado da
+mesma cor, escurecido.
+
+Isso REVERTE a escolha anterior, em que a cor separava apenas as duas
+categorias (bancos x cooperativas) e a bandeira só aparecia no painel e no
+popup. A objeção que motivava aquela escolha continua válida e vale registrar:
+14 matizes não são 14 cores distinguíveis, várias das marcas se aproximam entre
+si (o verde do Sicredi e o verde-limão da Cresol; os três azuis de Unicred,
+Uniprime e Credicoamo) e nenhuma paleta de 14 é segura para daltonismo. Quem
+precisar comparar DUAS bandeiras específicas não deve tentar fazê-lo a olho
+sobre as 14 ligadas — deve desligar as outras no painel, que é a leitura para a
+qual a hierarquia de camadas existe.
+
+O que a mudança compra em troca: com todas ligadas, dá para ver onde uma marca
+domina e onde ela não chega, o que a codificação por categoria não mostrava de
+jeito nenhum. Duas decisões seguram a legibilidade:
+
+* o marcador cresceu para `RAIO_MARCADOR` px — num disco de 5 px o matiz
+  praticamente não se lê;
+* cada linha do painel ganhou a amostra da sua cor (`.camada-cor`), para que a
+  correspondência cor -> bandeira não dependa de memória.
+
+--------------------------------------------------------------------------
+Precisão da posição dos marcadores
+--------------------------------------------------------------------------
+
+A posição vem de `src.cnefe`, que casa o endereço publicado pelo BACEN — com o
+CEP, que a fonte preenche em 100% das linhas — contra o Cadastro Nacional de
+Endereços do Censo 2022. Cada ponto carrega o nível que o resolveu, de
+`endereço` a `município`, e esse nível vai NO POPUP, junto do endereço.
+
+Mostrar o nível é o que torna aceitável um mapa de precisão mista: parte dos
+pontos está no imóvel exato e parte no miolo urbano do município, e o leitor
+consegue saber de qual se trata em vez de supor que todos valem o mesmo. Ver o
+cabeçalho de `src.cnefe` para a cadeia completa e para as taxas medidas.
 
 --------------------------------------------------------------------------
 Coroplético reativo
@@ -117,6 +171,7 @@ from __future__ import annotations
 import html
 import json
 import logging
+import re
 from pathlib import Path
 
 import folium
@@ -126,7 +181,7 @@ from branca.element import Element, MacroElement
 from folium.plugins import FeatureGroupSubGroup, MarkerCluster
 from jinja2 import Template
 
-from src import agregacao, config
+from src import agregacao, cnefe, config
 from src.etl_bacen import CATEGORIA_BANCO, CATEGORIA_COOPERATIVA
 
 _LOGGER = logging.getLogger(__name__)
@@ -255,35 +310,106 @@ ORDEM_SUB_CATEGORIAS = {
     ],
 }
 
-#: Cor do marcador por grupo — a cor codifica o NÍVEL 1, não a bandeira.
+#: Cor de RESERVA do marcador, por categoria.
 #:
-#: Com 14 bandeiras, 14 cores distinguíveis não existem: o mapa viraria ruído e
-#: nenhuma delas seria segura para daltonismo. Aqui a cor separa só as duas
-#: categorias, e a bandeira é identificada pelo nome da camada ligada no painel
-#: e pelo popup. Laranja e roxo foram escolhidos por serem os dois pares mais
-#: distinguíveis (Colorbrewer Dark2) que ainda contrastam com o fundo
-#: amarelo-verde-azul do coroplético.
+#: O marcador é pintado com a cor de marca da sua bandeira (`CORES_BANDEIRA`);
+#: este de-para só entra quando a bandeira não tem cor cadastrada — o que
+#: acontece se uma safra futura trouxer uma marca nova, caso em que os pontos
+#: dela saem em laranja (cooperativa) ou roxo (banco) em vez de sumirem ou
+#: quebrarem a geração.
+#:
+#: Laranja e roxo foram escolhidos por serem os dois pares mais distinguíveis
+#: (Colorbrewer Dark2) que ainda contrastam com o fundo amarelo-verde-azul do
+#: coroplético.
 COR_GRUPO = {
     CATEGORIA_COOPERATIVA: "#d95f02",
     CATEGORIA_BANCO: "#5e3c99",
 }
 
-#: Raio do marcador em pixels. Pequeno de propósito: são 7.600 pontos e o que
-#: importa na leitura ampliada é a contagem do balão de cluster, não o disco.
-RAIO_MARCADOR = 5
+#: Identificadores dos dois modos de visão.
+MODO_CIDADE = "cidade"
+MODO_PONTOS = "pontos"
+
+#: Rótulo e explicação de cada modo, na ordem em que aparecem no seletor.
+#:
+#: A segunda linha existe porque a mesma lista de bandeiras serve aos dois
+#: modos com efeitos diferentes — no modo cidade ela decide a COR dos
+#: municípios, no modo pontos decide QUAIS marcadores aparecem. Sem a legenda,
+#: marcar uma bandeira no modo cidade parece não fazer nada (o efeito está no
+#: coroplético, não numa camada que aparece ou some).
+MODOS_VISAO = [
+    {
+        "id": MODO_CIDADE,
+        "rotulo": "Nível cidade",
+        "dica": "as bandeiras marcadas colorem os municípios",
+    },
+    {
+        "id": MODO_PONTOS,
+        "rotulo": "Nível pontos de atendimento",
+        "dica": "as bandeiras marcadas mostram seus pontos",
+    },
+]
+
+#: Modo em que o mapa abre.
+#:
+#: `MODO_CIDADE`, porque o mapa abre no zoom da região inteira: ali os 7.600
+#: pontos estão todos agrupados em balões e o que se lê de fato é a cor dos
+#: municípios. O modo de pontos é a leitura de quem já aproximou.
+MODO_INICIAL = MODO_CIDADE
+
+#: Raio do marcador em pixels.
+#:
+#: Sete, e não cinco: com o marcador pintado na cor da marca, o disco deixou de
+#: ser só um alvo de clique e passou a CARREGAR informação — e num disco de 5 px
+#: não se distingue o verde do Sicredi do verde-limão da Cresol. O tamanho é o
+#: que torna a cor legível.
+#:
+#: Não muito mais que isso, porém: os discos só aparecem todos juntos a partir
+#: de `ZOOM_SEM_CLUSTER`, mas ali o centro de uma cidade grande já os põe lado a
+#: lado, e um raio maior os fundiria numa mancha.
+RAIO_MARCADOR = 7
+
+#: Espessura do contorno do marcador, em pixels.
+LARGURA_CONTORNO_MARCADOR = 1.2
+
+#: Quanto o contorno do marcador é escurecido em relação ao preenchimento.
+#:
+#: O contorno é derivado da própria cor da marca, e não fixo em branco, porque
+#: nenhuma cor fixa serve para as 14: sobre o basemap claro, um contorno branco
+#: some no amarelo do Banco do Brasil, e um contorno preto engrossa demais as
+#: marcas escuras. Escurecer a própria cor dá borda a todas na mesma medida.
+ESCURECIMENTO_CONTORNO = 0.45
+
+#: Zoom a partir do qual o agrupamento é desligado e todo ponto vira marcador.
+#:
+#: Dezessete é onde uma quadra urbana ocupa a tela inteira (~1 m por pixel nesta
+#: latitude). Dois pontos separados pelo raio mínimo de desempate — 8 m, o caso
+#: de dois atendimentos no mesmo endereço — ficam a ~8 px um do outro aqui, já
+#: distinguíveis, e completamente separados nos zooms seguintes.
+#:
+#: Abaixo disso o agrupamento ainda vale a pena: no zoom de cidade, o centro de
+#: Porto Alegre tem dezenas de pontos em poucos quarteirões, e sem balão eles
+#: viram uma mancha sólida em que não se lê quantidade nenhuma.
+ZOOM_SEM_CLUSTER = 17
 
 #: Opções do `MarkerCluster` de cada grupo pai.
 #:
-#: `spiderfyOnMaxZoom` é o que torna viável a decisão de não usar jitter: como
-#: todos os pontos de um município estão na mesma coordenada, é o leque do
-#: spiderfy que permite abrir e clicar em cada um. `showCoverageOnHover` fica
+#: `spiderfyOnMaxZoom` DESLIGADO é o pedido central desta configuração: ele é
+#: que desenhava as linhas ligando os pontos ao centro do balão. Ver o cabeçalho
+#: do módulo para por que ele pôde ser desligado e por que
+#: `disableClusteringAtZoom` passa a ser obrigatório junto.
+#:
+#: `zoomToBoundsOnClick` é o que substitui o leque na hora de abrir um balão:
+#: clicar aproxima até o retângulo que contém os pontos dele, e a partir de
+#: `ZOOM_SEM_CLUSTER` eles aparecem separados. `showCoverageOnHover` fica
 #: desligado porque o polígono de cobertura desenhado no hover se confunde com o
 #: contorno dos municípios do coroplético.
 OPCOES_CLUSTER = {
     "chunkedLoading": True,
-    "spiderfyOnMaxZoom": True,
+    "spiderfyOnMaxZoom": False,
     "showCoverageOnHover": False,
     "zoomToBoundsOnClick": True,
+    "disableClusteringAtZoom": ZOOM_SEM_CLUSTER,
     "maxClusterRadius": 45,
 }
 
@@ -324,6 +450,41 @@ _CSS_PAINEL = """
 .camada-contagem {
     color: #6b7785;
     font-weight: 400;
+}
+/* Seletor de modo de visão, no topo do painel: é a escolha de PRIMEIRO
+   nível, então vem antes da lista de bandeiras e separada dela por um fio. */
+.modo-visao {
+    margin: 0 0 6px;
+    padding-bottom: 7px;
+    border-bottom: 1px solid #b8c2cc;
+}
+.modo-visao label {
+    display: block;
+    margin: 3px 0;
+    font-weight: 600;
+    cursor: pointer;
+}
+.modo-visao input {
+    margin: 0 5px 0 0;
+    vertical-align: -1px;
+}
+.modo-visao .modo-dica {
+    display: block;
+    margin-left: 18px;
+    color: #6b7785;
+    font-weight: 400;
+    font-size: 11px;
+}
+/* Amostra da cor da bandeira, do lado do nome dela no painel. Redonda e do
+   tamanho do marcador, para ser lida como "este é o ponto no mapa". */
+.camada-cor {
+    display: inline-block;
+    width: 11px;
+    height: 11px;
+    margin-right: 5px;
+    border: 1px solid;
+    border-radius: 50%;
+    vertical-align: -1px;
 }
 .legenda-mapa {
     position: fixed;
@@ -398,6 +559,12 @@ _CSS_PAINEL = """
 .aviso-posicao {
     color: #8a6d1f;
     font-style: italic;
+}
+/* Procedência da coordenada nos dois níveis precisos: informação de rodapé,
+   não advertência — daí o cinza em vez do âmbar de `.aviso-posicao`. */
+.procedencia {
+    color: #6b7785;
+    font-size: 11px;
 }
 /* Cabeçalho que o controlador reativo insere no popup/tooltip do município,
    com o total da seleção atual. */
@@ -742,59 +909,56 @@ def adicionar_legenda(mapa: folium.Map) -> None:
 
 
 # --------------------------------------------------------------------------- #
-# 4. Posicionamento dos pontos no município
+# 4. Pontos já geocodificados
 # --------------------------------------------------------------------------- #
 
 
-def localizar_pontos(
-    pontos: pd.DataFrame,
-    agregado: gpd.GeoDataFrame,
+def carregar_pontos_geocodificados(
+    caminho: Path = config.ARQUIVO_PONTOS_GEOCODIFICADOS,
 ) -> pd.DataFrame:
-    """Atribui a cada ponto de atendimento a coordenada do seu município.
+    """Lê os pontos de atendimento com coordenada e nível de precisão.
 
-    Ver o cabeçalho do módulo para a decisão por trás disto. Em resumo: a fonte
-    não traz lat/lon e o endereço publicado não é geocodificável com confiança,
-    então a posição é de NÍVEL MUNICÍPIO — o ponto representativo do polígono,
-    sem jitter.
-
-    `representative_point()` é calculado sobre a geometria em graus. A
-    imprecisão que isso introduz é irrelevante aqui: o resultado só precisa cair
-    dentro do polígono certo, e o método garante isso por construção — ao
-    contrário do centroide, que em município recortado pela costa ou em forma de
-    "C" pode cair fora da própria área.
+    Este módulo não geocodifica nada: ele consome o que `src.cnefe` resolveu.
+    A separação é intencional — a geocodificação depende de ~580 MB de CNEFE em
+    cache e leva minutos, enquanto o desenho do mapa é iterado dezenas de vezes
+    durante um ajuste de cor ou de popup.
 
     Args:
-        pontos: saída de `agregacao.carregar_pontos`.
-        agregado: saída de `carregar_agregado`.
+        caminho: Parquet produzido por `src.cnefe`.
 
     Returns:
-        Cópia de `pontos` com `latitude` e `longitude`, sem as linhas cujo
-        `municipio_ibge` não existe na malha (reportadas no log).
+        DataFrame com uma linha por ponto de atendimento, incluindo
+        `latitude`, `longitude` e `precisao`.
+
+    Raises:
+        FileNotFoundError: se o arquivo não existir — rode `python -m src.cnefe`.
+        KeyError: se faltar alguma coluna exigida pelo mapa.
     """
-    representativos = agregado.geometry.representative_point()
-    coordenadas = pd.DataFrame(
-        {
-            "municipio_ibge": agregado["municipio_ibge"].to_numpy(),
-            "latitude": representativos.y.to_numpy(),
-            "longitude": representativos.x.to_numpy(),
-        }
-    )
-
-    localizados = pontos.merge(coordenadas, on="municipio_ibge", how="left")
-
-    sem_coordenada = localizados["latitude"].isna()
-    if int(sem_coordenada.sum()):
-        # Mesma condição que `agregacao.relatar_cobertura` já vigia do outro
-        # lado: código IBGE do BACEN inexistente na divisão territorial vigente.
-        _LOGGER.warning(
-            "%d ponto(s) com `municipio_ibge` fora da malha ficaram FORA do mapa. "
-            "Códigos: %r",
-            int(sem_coordenada.sum()),
-            sorted(localizados.loc[sem_coordenada, "municipio_ibge"].unique())[:10],
+    if not caminho.exists():
+        raise FileNotFoundError(
+            f"Pontos geocodificados não encontrados: {caminho}. "
+            "Rode `python -m src.cnefe` para gerá-los."
         )
-        localizados = localizados[~sem_coordenada]
 
-    return localizados.reset_index(drop=True)
+    pontos = pd.read_parquet(caminho)
+
+    exigidas = {
+        "latitude",
+        "longitude",
+        "precisao",
+        "categoria_if",
+        "sub_categoria",
+        "nome_instalacao",
+    }
+    faltantes = exigidas - set(pontos.columns)
+    if faltantes:
+        raise KeyError(
+            f"Colunas ausentes em {caminho.name}: {sorted(faltantes)!r}. "
+            "Regere o arquivo com `python -m src.cnefe`."
+        )
+
+    _LOGGER.info("%d pontos geocodificados carregados de %s.", len(pontos), caminho.name)
+    return pontos
 
 
 # --------------------------------------------------------------------------- #
@@ -802,15 +966,54 @@ def localizar_pontos(
 # --------------------------------------------------------------------------- #
 
 
+def _texto_endereco(linha: pd.Series) -> str:
+    """Monta a linha de endereço do popup, com número e bairro quando houver.
+
+    Args:
+        linha: uma linha de `carregar_pontos_geocodificados`.
+
+    Returns:
+        O endereço em uma linha, ex.: ``"R.URUGUAI,185 — CENTRO, 90010-901"``.
+    """
+    endereco = str(linha["endereco"])
+    partes = [html.escape(endereco)]
+
+    numero = linha.get("numero")
+    # O número só é acrescentado quando NÃO está embutido no endereço: a fonte
+    # grava "PCA.TIRADENTES,410" numas linhas e o número em coluna própria em
+    # outras, e repeti-lo produziria "PCA.TIRADENTES,410, 410".
+    #
+    # A conferência é contra o trecho DEPOIS da última vírgula, e não contra o
+    # endereço inteiro: um "in" solto acharia o "15" de "RUA 15 DE NOVEMBRO" e
+    # engoliria o número 15 do imóvel.
+    if not pd.isna(numero) and str(numero).strip():
+        embutido = re.search(r",\s*(\d+)", endereco)
+        if not (embutido and embutido.group(1) == str(numero).strip()):
+            partes.append(f", {html.escape(str(numero))}")
+
+    complemento = []
+    bairro = linha.get("bairro")
+    if not pd.isna(bairro) and str(bairro).strip():
+        complemento.append(html.escape(str(bairro)))
+    cep = linha.get("cep")
+    if not pd.isna(cep) and str(cep).strip():
+        complemento.append(html.escape(str(cep)))
+    if complemento:
+        partes.append(" — " + ", ".join(complemento))
+
+    return "".join(partes)
+
+
 def _popup_ponto(linha: pd.Series) -> str:
     """Monta o HTML do popup de um ponto de atendimento.
 
-    O aviso de posição aproximada é parte fixa do popup, não um detalhe de
-    rodapé: o marcador está no município, não no endereço, e quem clica precisa
-    saber disso sem ter de conhecer a decisão de implementação.
+    O nível de precisão é parte fixa do popup, e não um detalhe de rodapé: os
+    pontos deste mapa NÃO têm todos a mesma precisão — a maioria está no imóvel
+    ou na rua, uma minoria só no município —, e quem clica precisa saber em qual
+    caso está sem ter de conhecer a implementação. Ver `src.cnefe`.
 
     Args:
-        linha: uma linha de `localizar_pontos`.
+        linha: uma linha de `carregar_pontos_geocodificados`.
 
     Returns:
         O HTML do popup.
@@ -819,21 +1022,85 @@ def _popup_ponto(linha: pd.Series) -> str:
     instituicao = html.escape(str(linha["nome_instituicao"]))
     sub_categoria = html.escape(str(linha["sub_categoria"]))
     tipo = html.escape(str(linha["tipo_instalacao"]))
-    endereco = html.escape(str(linha["endereco"]))
     municipio = html.escape(str(linha["municipio"]))
     uf = html.escape(str(linha["uf"]))
+
+    precisao = str(linha.get("precisao", cnefe.PRECISAO_MUNICIPIO))
+    descricao = cnefe.DESCRICAO_PRECISAO.get(precisao, precisao)
+    # Só os dois níveis frouxos ganham destaque de aviso; nos dois precisos a
+    # informação é apenas a procedência da coordenada.
+    classe = (
+        "aviso-posicao"
+        if precisao in (cnefe.PRECISAO_LOCALIDADE, cnefe.PRECISAO_MUNICIPIO)
+        else "procedencia"
+    )
 
     return (
         '<div class="popup-municipio">'
         f"<h4>{nome}</h4>"
         f"<div><b>{sub_categoria}</b> &middot; {tipo}</div>"
         f'<div style="color:#6b7785">{instituicao}</div>'
-        f"<div style='padding-top:5px'>{endereco}<br>{municipio}/{uf}</div>"
-        '<div class="aviso-posicao" style="padding-top:6px">'
-        "Posição aproximada (nível município): o marcador está no município, "
-        "não no endereço acima.</div>"
+        f"<div style='padding-top:5px'>{_texto_endereco(linha)}<br>{municipio}/{uf}</div>"
+        f'<div class="{classe}" style="padding-top:6px">'
+        f"Posição: {html.escape(descricao)}.</div>"
         "</div>"
     )
+
+
+def _tooltip_ponto(linha: pd.Series) -> str:
+    """Monta o identificador que aparece ao passar o mouse sobre um ponto.
+
+    Curto de propósito: o tooltip segue o cursor e some, então ele responde só
+    "o que é este ponto" — bandeira e nome da instalação. O resto está no popup,
+    a um clique.
+
+    Args:
+        linha: uma linha de `carregar_pontos_geocodificados`.
+
+    Returns:
+        O HTML do tooltip.
+    """
+    return (
+        f'<b>{html.escape(str(linha["sub_categoria"]))}</b> &middot; '
+        f'{html.escape(str(linha["tipo_instalacao"]))}<br>'
+        f'{html.escape(str(linha["nome_instalacao"]))}'
+    )
+
+
+def _escurecer(cor: str, fracao: float = ESCURECIMENTO_CONTORNO) -> str:
+    """Devolve a cor misturada com preto, para usar como contorno.
+
+    Args:
+        cor: cor de preenchimento em ``"#rrggbb"``.
+        fracao: 0 devolve a cor original, 1 devolve preto.
+
+    Returns:
+        A cor escurecida em ``"#rrggbb"``.
+    """
+    r, g, b = _misturar(_hex_para_rgb(cor), (0, 0, 0), fracao)
+    return f"#{r:02x}{g:02x}{b:02x}"
+
+
+def cor_do_marcador(sub_categoria: str, categoria: str) -> str:
+    """Cor de preenchimento do marcador de uma bandeira.
+
+    Args:
+        sub_categoria: a bandeira, ex.: ``"Sicredi"``.
+        categoria: `CATEGORIA_COOPERATIVA` ou `CATEGORIA_BANCO`, usada como
+            reserva quando a bandeira não tem cor de marca cadastrada.
+
+    Returns:
+        A cor em ``"#rrggbb"``.
+    """
+    cor = CORES_BANDEIRA.get(sub_categoria)
+    if cor is None:
+        _LOGGER.warning(
+            "Bandeira %r sem cor em CORES_BANDEIRA; usando a cor de reserva de %r.",
+            sub_categoria,
+            categoria,
+        )
+        return COR_GRUPO[categoria]
+    return cor
 
 
 def _ordenar_sub_categorias(
@@ -877,11 +1144,15 @@ def adicionar_camadas_de_pontos(
     aparecer como uma linha própria no `LayerControl`. O subgrupo não desenha
     nada sozinho — ele injeta os marcadores no cluster do pai —, então desmarcar
     o pai remove todos os pontos do grupo, e desmarcar um subgrupo remove só a
-    sua bandeira, recontando os balões de cluster.
+    sua bandeira, recontando os balões.
+
+    O agrupamento acontecer no PAI, e não em cada subgrupo, é o que faz os
+    pontos de Sicredi e Sicoob vizinhos entrarem no MESMO balão de contagem, em
+    vez de virarem dois balões sobrepostos no mesmo pixel.
 
     Args:
         mapa: mapa base.
-        localizados: saída de `localizar_pontos`.
+        localizados: saída de `carregar_pontos_geocodificados`.
 
     Returns:
         Um dicionário por grupo, com o rótulo, o objeto da camada-pai e a lista
@@ -897,7 +1168,6 @@ def adicionar_camadas_de_pontos(
             _LOGGER.warning("Nenhum ponto na categoria %r; grupo omitido.", categoria)
             continue
 
-        cor = COR_GRUPO[categoria]
         sub_categorias = _ordenar_sub_categorias(
             set(do_grupo["sub_categoria"].dropna().unique()), categoria
         )
@@ -918,9 +1188,16 @@ def adicionar_camadas_de_pontos(
         subgrupos_do_grupo: list[dict] = []
         for sub_categoria in sub_categorias:
             da_bandeira = do_grupo[do_grupo["sub_categoria"] == sub_categoria]
+            cor = cor_do_marcador(sub_categoria, categoria)
+            contorno = _escurecer(cor)
             subgrupo = FeatureGroupSubGroup(
                 grupo_pai,
+                # A amostra de cor é o que torna a pintura por marca legível:
+                # 14 cores no mapa sem nenhuma chave seriam adivinhação, e o
+                # painel já lista exatamente as 14 bandeiras, uma por linha.
                 name=(
+                    f'<span class="camada-cor" style="background:{cor};'
+                    f'border-color:{contorno}"></span>'
                     f'<span class="camada-sub">{html.escape(sub_categoria)}</span>'
                     f'<span class="camada-contagem"> ({len(da_bandeira)})</span>'
                 ),
@@ -933,16 +1210,13 @@ def adicionar_camadas_de_pontos(
                 folium.CircleMarker(
                     location=(ponto["latitude"], ponto["longitude"]),
                     radius=RAIO_MARCADOR,
-                    color="#ffffff",
-                    weight=1,
+                    color=contorno,
+                    weight=LARGURA_CONTORNO_MARCADOR,
                     fill=True,
                     fill_color=cor,
-                    fill_opacity=0.9,
+                    fill_opacity=0.92,
                     popup=folium.Popup(_popup_ponto(ponto), max_width=300),
-                    tooltip=(
-                        f"{html.escape(str(ponto['nome_instalacao']))} "
-                        f"({html.escape(str(sub_categoria))})"
-                    ),
+                    tooltip=folium.Tooltip(_tooltip_ponto(ponto), sticky=True),
                 ).add_to(subgrupo)
 
             subgrupos_do_grupo.append(
@@ -984,11 +1258,15 @@ def criar_mapa_base() -> folium.Map:
     Returns:
         O `folium.Map`, já com o CSS do painel e da legenda no ``<head>``.
     """
+    # `prefer_canvas` desenha os 7.600 marcadores num único canvas em vez de um
+    # nó SVG por ponto. Sem cluster, todos existem no DOM ao mesmo tempo, e é
+    # essa opção que mantém a navegação fluida — ver o cabeçalho do módulo.
     mapa = folium.Map(
         location=config.CENTRO_MAPA,
         zoom_start=config.ZOOM_INICIAL,
         tiles=config.TILES_PADRAO,
         control_scale=True,
+        prefer_canvas=True,
     )
     mapa.get_root().header.add_child(Element(_CSS_PAINEL))
     return mapa
@@ -1020,6 +1298,28 @@ _JS_CONTROLADOR = """
         return;
     }
 
+    /* O coroplético ganha um painel só dele para que o modo de visão possa
+       escondê-lo sem esconder os marcadores. Por padrão os dois desenhariam no
+       mesmo `overlayPane` — e, com `prefer_canvas`, no mesmo <canvas>, onde não
+       há como separar um do outro.
+
+       zIndex 350: acima dos ladrilhos (200) e abaixo dos marcadores (400/600),
+       que é a ordem de leitura — o polígono é fundo, o ponto é figura.
+
+       A troca de painel exige retirar e repor a camada, e isso acontece AQUI,
+       antes de o controlador guardar qualquer referência às caixas do painel
+       de camadas: retirar e repor faz o `L.Control.Layers` se reconstruir, e
+       referências guardadas antes disso apontariam para elementos descartados. */
+    var PANE_COROPLETICO = "coropletico";
+    if (!mapa.getPane(PANE_COROPLETICO)) {
+        mapa.createPane(PANE_COROPLETICO).style.zIndex = 350;
+    }
+    geo.eachLayer(function (camada) { camada.options.pane = PANE_COROPLETICO; });
+    if (mapa.hasLayer(geo)) {
+        mapa.removeLayer(geo);
+        mapa.addLayer(geo);
+    }
+
     /* --- Estado da seleção, espelhando os dois níveis do painel --------- */
     var meta = new Map();
     var grupoAtivo = {};
@@ -1049,6 +1349,89 @@ _JS_CONTROLADOR = """
             });
         });
         return sel;
+    }
+
+    /* --------------------------------------------------------------------
+       Modo de visão: polígonos OU marcadores
+       --------------------------------------------------------------------
+
+       O modo controla só a VISIBILIDADE das duas representações. Quem está
+       marcado no painel continua valendo para as duas: no modo cidade a
+       seleção de bandeiras colore o coroplético, no modo pontos ela decide
+       quais marcadores aparecem. Por isso a lista de bandeiras não é
+       desabilitada em nenhum dos dois. */
+    var modo = cfg.modoInicial;
+
+    /* Trocar de modo NÃO adiciona nem remove camada nenhuma: o que muda é a
+       visibilidade dos painéis (*panes*) do Leaflet em que elas desenham.
+       Essa distinção não é estilo, é correção.
+
+       Adicionar ou remover camada por fora do painel de camadas faz o
+       `L.Control.Layers` se reconstruir inteiro — ele escuta `layeradd` e
+       `layerremove` e, quando a mudança não veio de um clique nele mesmo,
+       refaz a lista do zero. Refazer a lista descarta os <input> atuais e
+       recria cada um com `checked` copiado de `mapa.hasLayer(camada)`. O
+       resultado era o modo cidade, que tira todos os marcadores do mapa,
+       DESMARCAR as 14 bandeiras do painel e levar junto a cor do coroplético
+       — e ainda deixar a cascata presa a caixas que não estavam mais na tela.
+
+       Com painéis, a divisão de responsabilidade fica limpa: a caixa marcada
+       diz quais bandeiras estão selecionadas (e o Leaflet cuida disso sozinho,
+       como sempre cuidou), e o modo diz qual das duas representações da mesma
+       seleção está à vista. */
+    function aplicarModo() {
+        var mostrarPontos = (modo === cfg.modoPontos);
+
+        /* `visibility:hidden`, e não `display:none`, porque ele some com o
+           conteúdo SEM tirar o elemento do fluxo: o <canvas> em que o
+           coroplético é desenhado mantém posição e dimensão, e o Leaflet
+           continua redesenhando nele durante os zooms feitos no outro modo —
+           voltar para o modo cidade mostra o enquadramento atual, nunca uma
+           tela em branco esperando o próximo redesenho. (Conferido no
+           navegador: com o painel escondido, o canvas do coroplético seguiu
+           sendo repintado a cada mudança de enquadramento.)
+
+           E, como elemento invisível não recebe evento de mouse, o mesmo
+           ajuste impede que o tooltip de município apareça no modo de
+           pontos, onde não há município desenhado para explicar de onde ele
+           veio. */
+        var esconder = function (painel, oculto) {
+            if (painel) { painel.style.visibility = oculto ? "hidden" : ""; }
+        };
+        esconder(mapa.getPane(PANE_COROPLETICO), mostrarPontos);
+        esconder(mapa.getPane("overlayPane"), !mostrarPontos);
+        esconder(mapa.getPane("markerPane"), !mostrarPontos);
+
+        var legenda = document.getElementById("legenda-coropletico");
+        if (legenda) { legenda.style.display = mostrarPontos ? "none" : ""; }
+    }
+
+    function montarSeletorDeModo() {
+        var painel = controle.getContainer && controle.getContainer();
+        if (!painel) { return; }
+        var lista = painel.querySelector(".leaflet-control-layers-list") || painel;
+
+        var caixa = L.DomUtil.create("div", "modo-visao");
+        var html = "";
+        cfg.modos.forEach(function (m) {
+            html += '<label><input type="radio" name="modo-visao" value="' +
+                m.id + '"' + (m.id === modo ? " checked" : "") + ">" +
+                m.rotulo + '<span class="modo-dica">' + m.dica + "</span></label>";
+        });
+        caixa.innerHTML = html;
+        lista.insertBefore(caixa, lista.firstChild);
+
+        /* Sem isto, clicar no seletor também chega ao mapa embaixo dele — o
+           que faz o mapa dar zoom no duplo clique e arrastar no drag. */
+        L.DomEvent.disableClickPropagation(caixa);
+
+        var opcoes = caixa.querySelectorAll("input");
+        for (var i = 0; i < opcoes.length; i++) {
+            opcoes[i].addEventListener("change", function () {
+                modo = this.value;
+                aplicarModo();
+            });
+        }
     }
 
     var atual = {sel: [], cortes: [], cores: [], max: 0};
@@ -1271,13 +1654,21 @@ _JS_CONTROLADOR = """
     }
 
     var caixas = [];
+    /* Mesma informação de `caixas`, achatada e com o identificador de cada
+       camada ao lado do seu <input>. É o que permite ler a seleção direto das
+       caixas — ver `lerPainel`. */
+    var caixasPorId = [];
     cfg.grupos.forEach(function (g) {
         var caixaGrupo = inputDe(window[g.camada]);
         if (!caixaGrupo) { return; }
+        caixasPorId.push({tipo: "grupo", id: g.id, input: caixaGrupo});
         var caixasFilhas = [];
         g.subs.forEach(function (s) {
             var c = inputDe(window[s.camada]);
-            if (c) { caixasFilhas.push(c); }
+            if (c) {
+                caixasFilhas.push(c);
+                caixasPorId.push({tipo: "sub", id: s.rotulo, input: c});
+            }
         });
         caixas.push({grupo: caixaGrupo, filhas: caixasFilhas});
     });
@@ -1330,8 +1721,43 @@ _JS_CONTROLADOR = """
         });
     });
 
+    /* --------------------------------------------------------------------
+       A seleção é lida das CAIXAS, não da presença das camadas no mapa
+       --------------------------------------------------------------------
+
+       O controlador nasceu escutando overlayadd/overlayremove, o que bastava
+       enquanto marcar uma caixa sempre implicava adicionar a camada. Com o
+       seletor de modo isso deixou de valer: no modo cidade nenhum marcador
+       está no mapa, então DESmarcar uma bandeira manda o Leaflet remover uma
+       camada que já não estava lá — `removeLayer` não faz nada e, o que
+       importa aqui, NÃO dispara `overlayremove`. O coroplético continuava
+       pintado com a bandeira que o usuário acabara de desligar.
+
+       Ler as caixas resolve nos dois sentidos e independe do modo: a caixa é
+       a intenção do usuário, a camada no mapa é só a consequência dela no
+       modo atual. Os eventos continuam escutados para as mudanças que não
+       passam por clique. */
+    function lerPainel() {
+        caixasPorId.forEach(function (c) {
+            if (c.tipo === "grupo") { grupoAtivo[c.id] = c.input.checked; }
+            else { subAtivo[c.id] = c.input.checked; }
+        });
+    }
+
+    /* Registrado DEPOIS dos ouvintes de cascata acima, portanto roda depois
+       deles: quando este chega, as caixas já estão no estado final. */
+    caixasPorId.forEach(function (c) {
+        c.input.addEventListener("click", function () {
+            lerPainel();
+            agendarRecalculo();
+        });
+    });
+
+    lerPainel();
     atualizarParciais();
+    montarSeletorDeModo();
     recalcular();
+    aplicarModo();
 })();
 """
 
@@ -1409,6 +1835,16 @@ def adicionar_controle_reativo(
             if sub["rotulo"] in CORES_BANDEIRA
         },
         "totalBandeiras": sum(len(grupo["subs"]) for grupo in estrutura),
+        "modos": [
+            {
+                "id": modo["id"],
+                "rotulo": html.escape(modo["rotulo"]),
+                "dica": html.escape(modo["dica"]),
+            }
+            for modo in MODOS_VISAO
+        ],
+        "modoInicial": MODO_INICIAL,
+        "modoPontos": MODO_PONTOS,
     }
 
     script = (
@@ -1448,7 +1884,7 @@ def adicionar_controle_de_camadas(mapa: folium.Map) -> folium.LayerControl:
 
 def gera_mapa(
     caminho_agregado: Path = config.ARQUIVO_AGREGADO_MUNICIPIO,
-    caminho_pontos: Path = config.ARQUIVO_IF_SUL_CATEGORIZADO,
+    caminho_pontos: Path = config.ARQUIVO_PONTOS_GEOCODIFICADOS,
     destino: Path = config.ARQUIVO_MAPA,
 ) -> Path:
     """Gera o mapa interativo completo e grava o HTML.
@@ -1461,14 +1897,14 @@ def gera_mapa(
        município (nome, população — ou "dado indisponível" —, total de bancos,
        total de pontos de cooperativas e o detalhamento por `sub_categoria`);
     4. adiciona a legenda discreta do coroplético;
-    5. posiciona cada ponto de atendimento no polígono do seu município e monta
-       as camadas em dois níveis (grupo pai por `categoria_if`, subgrupo por
+    5. lê os pontos já geocodificados por `src.cnefe` e monta as camadas em
+       dois níveis (grupo pai por `categoria_if`, subgrupo por
        `sub_categoria`);
     6. adiciona o `LayerControl` aberto e grava o HTML.
 
     Args:
         caminho_agregado: GeoParquet de `src.agregacao`.
-        caminho_pontos: Parquet categorizado de `src.etl_bacen`.
+        caminho_pontos: Parquet geocodificado de `src.cnefe`.
         destino: caminho do HTML de saída; o diretório é criado se faltar.
 
     Returns:
@@ -1478,7 +1914,7 @@ def gera_mapa(
         FileNotFoundError: se algum dos dois Parquet de entrada não existir.
     """
     agregado = carregar_agregado(caminho_agregado)
-    pontos = agregacao.carregar_pontos(caminho_pontos)
+    localizados = carregar_pontos_geocodificados(caminho_pontos)
 
     mapa = criar_mapa_base()
 
@@ -1486,7 +1922,6 @@ def gera_mapa(
     coropletico = adicionar_coropletico(mapa, com_textos)
     adicionar_legenda(mapa)
 
-    localizados = localizar_pontos(pontos, agregado)
     estrutura = adicionar_camadas_de_pontos(mapa, localizados)
 
     # Depois de TODAS as camadas — ver `adicionar_controle_de_camadas`.
@@ -1512,7 +1947,7 @@ def imprimir_resumo(
 
     Args:
         agregado: saída de `carregar_agregado`.
-        localizados: saída de `localizar_pontos`.
+        localizados: saída de `carregar_pontos_geocodificados`.
         estrutura: saída de `adicionar_camadas_de_pontos`.
         destino: caminho do HTML gravado.
     """
@@ -1538,14 +1973,22 @@ def imprimir_resumo(
     sem_populacao = int(agregado["populacao"].isna().sum())
     print(f"   população indisponível em {sem_populacao} município(s)\n")
 
+    print(f"-- posição dos marcadores (ver src/cnefe.py) --")
+    contagem = localizados["precisao"].value_counts()
+    for nivel in cnefe.ORDEM_PRECISAO:
+        quantos = int(contagem.get(nivel, 0))
+        if quantos:
+            print(f"   {nivel:<12} {quantos:>5}  {quantos/len(localizados):>6.1%}")
+    print()
+
     print(f"-- camadas de ponto: {len(localizados)} marcadores --")
     for grupo in estrutura:
         print(f"   [1] {grupo['rotulo']} ({grupo['pontos']})")
         for sub in grupo["subs"]:
-            cor = CORES_BANDEIRA.get(sub["rotulo"], "—")
+            cor = cor_do_marcador(sub["rotulo"], grupo["categoria"])
             print(
                 f"        [2] {sub['rotulo']:<20} ({sub['pontos']:>4})  "
-                f"cor de marca {cor}"
+                f"marcador {cor}"
             )
     print()
 
