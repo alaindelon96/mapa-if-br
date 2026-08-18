@@ -33,6 +33,56 @@ def test_chave_logradouro_reconcilia_as_duas_fontes(bacen, cnefe_fonte):
     assert cnefe.chave_logradouro(bacen) == cnefe.chave_logradouro(cnefe_fonte)
 
 
+def test_chave_logradouro_nao_converte_romano_de_uma_letra():
+    """"Rua X" e "Rua Dez" são ruas diferentes e não podem virar a mesma chave.
+
+    Nome de rua por letra é comum em loteamento; converter o romano de uma
+    letra fundiria as duas e devolveria a mediana de um conjunto misturado.
+    """
+    assert cnefe.chave_logradouro("RUA X") != cnefe.chave_logradouro("RUA DEZ")
+    assert cnefe.chave_logradouro("RUA V") != cnefe.chave_logradouro("AVENIDA CINCO")
+    # Os romanos de duas letras ou mais continuam valendo — é o caso comum.
+    assert cnefe.chave_logradouro("AV XV DE NOVEMBRO") == cnefe.chave_logradouro(
+        "AVENIDA QUINZE DE NOVEMBRO"
+    )
+
+
+def test_chave_logradouro_trata_nulo_do_pandas():
+    """`pd.NA` tem de virar chave vazia, e não a chave literal "NA"."""
+    for nulo in (None, float("nan"), pd.NA):
+        assert cnefe.chave_logradouro(nulo) == "", f"falhou para {nulo!r}"
+
+
+def test_quilometragem_nao_vira_numero_de_imovel():
+    """Em endereço de rodovia, o número após a vírgula é KM, não imóvel."""
+    pontos = pd.DataFrame(
+        {
+            "endereco": ["ROD.SC-401,KM 5,4756", "R.URUGUAI,185"],
+            "numero": ["", ""],
+            "cep": ["88050-000", "90010-901"],
+            "municipio_ibge": ["4205407", "4314902"],
+        }
+    )
+    alvo = cnefe.preparar_alvo(pontos)
+    assert pd.isna(alvo.loc[0, "numero_imovel"]), (
+        "o KM 5 da rodovia virou número de imóvel e casaria com a casa nº 5"
+    )
+    assert alvo.loc[1, "numero_imovel"] == 185
+
+
+def test_numero_zero_nao_e_numero_de_imovel():
+    """Zero é o sentinela de "sem número" do CNEFE, não um imóvel."""
+    pontos = pd.DataFrame(
+        {
+            "endereco": ["AV BRASIL,0"],
+            "numero": ["0"],
+            "cep": ["99999-000"],
+            "municipio_ibge": ["4314902"],
+        }
+    )
+    assert pd.isna(cnefe.preparar_alvo(pontos).loc[0, "numero_imovel"])
+
+
 def test_chave_logradouro_nao_confunde_logradouros_distintos():
     """A normalização não pode ser tão agressiva a ponto de colidir nomes."""
     assert cnefe.chave_logradouro("RUA SAO PEDRO") != cnefe.chave_logradouro(

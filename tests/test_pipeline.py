@@ -22,6 +22,7 @@ inexistente.
 import re
 from datetime import datetime
 
+import geopandas as gpd
 import pandas as pd
 import pytest
 
@@ -322,6 +323,29 @@ def test_coordenadas_caem_dentro_do_sul(geocodificados):
     assert len(fora) == 0, (
         f"{len(fora)} ponto(s) fora do retângulo do Sul. Exemplos: "
         f"{fora[['municipio', 'uf', 'latitude', 'longitude']].head().to_dict('records')!r}"
+    )
+
+
+def test_todo_ponto_cai_dentro_do_proprio_municipio(geocodificados):
+    """A invariante forte da geocodificação: ponto no polígono do seu município.
+
+    `CAIXA_SUL` é grosseira de propósito e só pega coordenada trocada de sinal
+    ou de outra região do país. A conferência que importa é esta: um CEP
+    digitado errado na fonte casa com um endereço REAL e plausível em outra
+    cidade, e nada no texto denuncia — só o polígono. `src.cnefe` rebaixa esses
+    pontos na geração; o teste existe para que uma regressão nessa conferência,
+    ou uma mudança de ordem que a torne obsoleta (o deslocamento em leque é
+    aplicado depois dela), não passe despercebida.
+    """
+    _exigir_arquivo(config.ARQUIVO_AGREGADO_MUNICIPIO, "python -m src.agregacao")
+    malha = gpd.read_parquet(config.ARQUIVO_AGREGADO_MUNICIPIO)
+
+    dentro = cnefe.conferir_dentro_do_municipio(geocodificados, malha)
+    fora = geocodificados[~dentro]
+    assert len(fora) == 0, (
+        f"{len(fora)} ponto(s) fora do polígono do próprio município. "
+        f"Exemplos: "
+        f"{fora[['municipio', 'uf', 'precisao', 'latitude', 'longitude']].head().to_dict('records')!r}"
     )
 
 

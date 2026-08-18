@@ -942,6 +942,11 @@ def carregar_pontos_geocodificados(
 
     pontos = pd.read_parquet(caminho)
 
+    # A lista cobre TUDO que o desenho lê: as três colunas da geocodificação,
+    # as duas que montam as camadas e as sete que popup e tooltip renderizam.
+    # Uma lista mais curta deixaria um Parquet de safra antiga passar na
+    # validação e quebrar com KeyError lá adiante, dentro do laço dos 7.600
+    # marcadores — sem a mensagem que diz como consertar.
     exigidas = {
         "latitude",
         "longitude",
@@ -949,6 +954,14 @@ def carregar_pontos_geocodificados(
         "categoria_if",
         "sub_categoria",
         "nome_instalacao",
+        "nome_instituicao",
+        "tipo_instalacao",
+        "endereco",
+        "numero",
+        "bairro",
+        "cep",
+        "municipio",
+        "uf",
     }
     faltantes = exigidas - set(pontos.columns)
     if faltantes:
@@ -983,13 +996,22 @@ def _texto_endereco(linha: pd.Series) -> str:
     # grava "PCA.TIRADENTES,410" numas linhas e o número em coluna própria em
     # outras, e repeti-lo produziria "PCA.TIRADENTES,410, 410".
     #
-    # A conferência é contra o trecho DEPOIS da última vírgula, e não contra o
-    # endereço inteiro: um "in" solto acharia o "15" de "RUA 15 DE NOVEMBRO" e
-    # engoliria o número 15 do imóvel.
+    # O número já está à vista quando aparece DEPOIS DE UMA VÍRGULA
+    # ("PCA.TIRADENTES,410", "AVENIDA DA VINDIMA, NUM 303") ou NO FIM do
+    # endereço ("AV BENTO GONCALVES 1157") — as duas formas que a fonte usa
+    # para embutir o número no texto do logradouro.
+    #
+    # As duas posições são exigidas por motivos opostos. Só a vírgula deixava
+    # passar "AV BENTO GONCALVES 1157" e rendia "1157, 1157" no popup. Já
+    # procurar o número em QUALQUER posição erra para o outro lado: o "15" de
+    # "RUA 15 DE NOVEMBRO" esconderia o número 15 de um imóvel dessa mesma rua.
+    # (Nenhum dos dois casos aparece na safra 202606 — o primeiro ocorria uma
+    # vez antes desta correção, o segundo nenhuma.)
     if not pd.isna(numero) and str(numero).strip():
-        embutido = re.search(r",\s*(\d+)", endereco)
-        if not (embutido and embutido.group(1) == str(numero).strip()):
-            partes.append(f", {html.escape(str(numero))}")
+        procurado = re.escape(str(numero).strip())
+        ja_visivel = re.search(rf",[^,]*\b{procurado}\b|\b{procurado}\b\s*$", endereco)
+        if not ja_visivel:
+            partes.append(f", {html.escape(str(numero).strip())}")
 
     complemento = []
     bairro = linha.get("bairro")
@@ -1654,21 +1676,13 @@ _JS_CONTROLADOR = """
     }
 
     var caixas = [];
-    /* Mesma informação de `caixas`, achatada e com o identificador de cada
-       camada ao lado do seu <input>. É o que permite ler a seleção direto das
-       caixas — ver `lerPainel`. */
-    var caixasPorId = [];
     cfg.grupos.forEach(function (g) {
         var caixaGrupo = inputDe(window[g.camada]);
         if (!caixaGrupo) { return; }
-        caixasPorId.push({tipo: "grupo", id: g.id, input: caixaGrupo});
         var caixasFilhas = [];
         g.subs.forEach(function (s) {
             var c = inputDe(window[s.camada]);
-            if (c) {
-                caixasFilhas.push(c);
-                caixasPorId.push({tipo: "sub", id: s.rotulo, input: c});
-            }
+            if (c) { caixasFilhas.push(c); }
         });
         caixas.push({grupo: caixaGrupo, filhas: caixasFilhas});
     });
@@ -1721,39 +1735,6 @@ _JS_CONTROLADOR = """
         });
     });
 
-    /* --------------------------------------------------------------------
-       A seleção é lida das CAIXAS, não da presença das camadas no mapa
-       --------------------------------------------------------------------
-
-       O controlador nasceu escutando overlayadd/overlayremove, o que bastava
-       enquanto marcar uma caixa sempre implicava adicionar a camada. Com o
-       seletor de modo isso deixou de valer: no modo cidade nenhum marcador
-       está no mapa, então DESmarcar uma bandeira manda o Leaflet remover uma
-       camada que já não estava lá — `removeLayer` não faz nada e, o que
-       importa aqui, NÃO dispara `overlayremove`. O coroplético continuava
-       pintado com a bandeira que o usuário acabara de desligar.
-
-       Ler as caixas resolve nos dois sentidos e independe do modo: a caixa é
-       a intenção do usuário, a camada no mapa é só a consequência dela no
-       modo atual. Os eventos continuam escutados para as mudanças que não
-       passam por clique. */
-    function lerPainel() {
-        caixasPorId.forEach(function (c) {
-            if (c.tipo === "grupo") { grupoAtivo[c.id] = c.input.checked; }
-            else { subAtivo[c.id] = c.input.checked; }
-        });
-    }
-
-    /* Registrado DEPOIS dos ouvintes de cascata acima, portanto roda depois
-       deles: quando este chega, as caixas já estão no estado final. */
-    caixasPorId.forEach(function (c) {
-        c.input.addEventListener("click", function () {
-            lerPainel();
-            agendarRecalculo();
-        });
-    });
-
-    lerPainel();
     atualizarParciais();
     montarSeletorDeModo();
     recalcular();

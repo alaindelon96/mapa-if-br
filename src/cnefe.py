@@ -184,9 +184,17 @@ ABREVIATURAS = {
 #: Números escritos em algarismo romano pelo BACEN e por extenso pelo CNEFE.
 #: "AV XV DE NOVEMBRO" vs. "AVENIDA QUINZE DE NOVEMBRO" é o caso mais comum de
 #: logradouro central de cidade do Sul, então vale a tabelinha.
+#:
+#: Romanos de UMA letra ficam de fora de propósito. "V" e "X" são nomes de rua
+#: legítimos e frequentes em loteamento — "Rua X", "Rua V" —, e convertê-los
+#: fundiria a "Rua X" com a "Rua Dez" do mesmo município numa única chave,
+#: misturando os endereços das duas e devolvendo uma mediana que não fica em
+#: nenhuma delas. Perde-se o "Av. V" que quisesse dizer "Avenida Cinco"; é o
+#: lado certo do erro, porque logradouro não reconhecido apenas desce de nível,
+#: enquanto logradouro reconhecido ERRADO produz uma posição confiante e falsa.
 ROMANOS = {
-    "II": "DOIS", "III": "TRES", "IV": "QUATRO", "V": "CINCO", "VI": "SEIS",
-    "VII": "SETE", "VIII": "OITO", "IX": "NOVE", "X": "DEZ", "XI": "ONZE",
+    "II": "DOIS", "III": "TRES", "IV": "QUATRO", "VI": "SEIS",
+    "VII": "SETE", "VIII": "OITO", "IX": "NOVE", "XI": "ONZE",
     "XII": "DOZE", "XIII": "TREZE", "XIV": "QUATORZE", "XV": "QUINZE",
     "XVI": "DEZESSEIS", "XVII": "DEZESSETE", "XVIII": "DEZOITO",
     "XIX": "DEZENOVE", "XX": "VINTE", "XXI": "VINTE E UM",
@@ -213,7 +221,12 @@ def chave_logradouro(texto: object) -> str:
         ``"R.GAL.SAMPAIO"`` (BACEN) quanto para ``"RUA GENERAL SAMPAIO"``
         (CNEFE). String vazia quando não sobra nada aproveitável.
     """
-    if texto is None or (isinstance(texto, float) and np.isnan(texto)):
+    # `pd.isna` cobre None, float("nan") e também `pd.NA`, que escapava da
+    # guarda anterior e virava a chave literal "NA" — uma chave NÃO vazia, e
+    # portanto elegível para casamento, em vez de fazer o ponto descer de nível.
+    # O teste de `str` vem antes porque `pd.isna` sobre texto é sempre False e
+    # a checagem seria desperdício no caminho normal.
+    if not isinstance(texto, str) and pd.isna(texto):
         return ""
 
     sem_acento = unidecode(str(texto)).upper()
@@ -286,9 +299,21 @@ def baixar_uf(uf: str, usar_cache: bool = True) -> Path:
     destino = config.DIR_CNEFE / nome
 
     if usar_cache and destino.exists() and destino.stat().st_size > 0:
-        tamanho_mb = destino.stat().st_size / 1024 / 1024
-        _LOGGER.info("CNEFE %s: reaproveitando %s (%.0f MB).", uf, nome, tamanho_mb)
-        return destino
+        # Conferir que o arquivo é um ZIP íntegro, e não só que ele existe:
+        # download interrompido antes do `replace`, disco cheio ou resposta de
+        # erro servida com HTTP 200 deixariam um arquivo grande e inútil no
+        # cache, e ele seria aceito para sempre — toda execução seguinte
+        # quebraria lá adiante, na varredura, com um BadZipFile que não diz que
+        # a saída é apagar o cache. `is_zipfile` lê só o diretório central no
+        # fim do arquivo, então o custo é desprezível mesmo nos 236 MB do RS.
+        if zipfile.is_zipfile(destino):
+            tamanho_mb = destino.stat().st_size / 1024 / 1024
+            _LOGGER.info("CNEFE %s: reaproveitando %s (%.0f MB).", uf, nome, tamanho_mb)
+            return destino
+        _LOGGER.warning(
+            "CNEFE %s: %s está corrompido ou incompleto; baixando de novo.",
+            uf, nome,
+        )
 
     rede.usar_certificados_do_sistema()
     destino.parent.mkdir(parents=True, exist_ok=True)
@@ -319,8 +344,22 @@ def baixar_uf(uf: str, usar_cache: bool = True) -> Path:
 # 2. Preparo das chaves do lado BACEN
 # --------------------------------------------------------------------------- #
 
+#: Colunas que existem só para o casamento e NÃO entram no Parquet publicado.
+#:
+#: São andaime: chave normalizada, CEP sem pontuação, número já interpretado.
+#: Publicá-las misturaria trabalho interno com o dado do BACEN no mesmo arquivo,
+#: sem nada distinguindo um do outro — `chave_logr`, em particular, tem cara de
+#: campo de origem e não é.
+COLUNAS_DE_TRABALHO = ["cep8", "cep_generico", "logradouro", "numero_imovel", "chave_logr"]
+
 #: CEP que a fonte usa como "não informado".
 CEP_NULO = "00000000"
+
+#: Marca de quilometragem num endereço de rodovia.
+#:
+#: ``\bKM\b`` casa "KM 5", "Km 377" e ", KM 11," sem casar palavras que apenas
+#: contenham as duas letras. Ver `preparar_alvo` para o que é feito com isso.
+PADRAO_QUILOMETRO = r"\bKM\b"
 
 
 def preparar_alvo(pontos: pd.DataFrame) -> pd.DataFrame:
@@ -358,8 +397,25 @@ def preparar_alvo(pontos: pd.DataFrame) -> pd.DataFrame:
 
     numero_coluna = _somente_digitos(alvo["numero"])
     numero_endereco = resto.astype("string").fillna("").str.extract(r"(\d+)")[0]
+
+    # Endereço de rodovia: o número que vem depois da vírgula é QUILOMETRAGEM,
+    # não número de imóvel — "ROD.SC-401,KM 5,4756" daria 5, que casaria com a
+    # casa de número 5 daquele logradouro no CNEFE e sairia rotulado como
+    # endereço exato. Nesses casos o texto do endereço não fornece número
+    # nenhum, e o ponto desce para o nível de logradouro, que é o certo. A
+    # coluna própria `numero` continua valendo: ela é campo dedicado, não
+    # interpretação de texto livre.
+    tem_km = endereco.str.contains(PADRAO_QUILOMETRO, case=False, regex=True, na=False)
+    numero_endereco = numero_endereco.mask(tem_km)
+
     numero = numero_coluna.where(numero_coluna != "", numero_endereco.fillna(""))
-    alvo["numero_imovel"] = pd.to_numeric(numero, errors="coerce").astype("Int64")
+    numero_imovel = pd.to_numeric(numero, errors="coerce").astype("Int64")
+
+    # Zero NÃO é número de imóvel: é o valor que o CNEFE grava em NUM_ENDERECO
+    # para endereço SEM número (DSC_MODIFICADOR "SN"). Casar por ele encontraria
+    # a mediana das casas sem numeração do logradouro e rotularia o resultado
+    # como endereço exato — precisão inventada em cima de um sentinela.
+    alvo["numero_imovel"] = numero_imovel.mask(numero_imovel == 0)
 
     alvo["chave_logr"] = _chaves_de_serie(alvo["logradouro"])
     return alvo
@@ -391,8 +447,8 @@ BLOCO_LEITURA = 1 << 26
 
 def _varrer_uf(
     caminho_zip: Path,
-    chaves_cep: set[tuple[str, str]],
-    chaves_logr: set[tuple[str, str]],
+    chaves_cep: set[str],
+    chaves_logr: set[str],
 ) -> tuple[pd.DataFrame, pd.DataFrame, int]:
     """Lê um ZIP do CNEFE e retém só os endereços que interessam.
 
@@ -404,8 +460,8 @@ def _varrer_uf(
 
     Args:
         caminho_zip: ZIP de uma UF, como devolvido por `baixar_uf`.
-        chaves_cep: pares ``(código do município, CEP de 8 dígitos)`` buscados.
-        chaves_logr: pares ``(código do município, chave de logradouro)``.
+        chaves_cep: chaves ``"município|CEP"`` buscadas.
+        chaves_logr: chaves ``"município|chave de logradouro"`` buscadas.
 
     Returns:
         ``(por_cep, por_logr, lidos)``: os endereços retidos por cada critério
@@ -448,10 +504,39 @@ def _varrer_uf(
     return por_cep, por_logr, lidos
 
 
+#: Separador entre município e chave na chave composta de busca.
+#:
+#: Barra vertical porque ela não ocorre em código de município (só dígitos) nem
+#: em chave de logradouro (`chave_logradouro` deixa passar só letras, dígitos e
+#: espaço) nem em CEP — não há como duas chaves diferentes colidirem numa só.
+SEPARADOR_CHAVE = "|"
+
+
+def _pertence(municipio: pd.Series, chave: pd.Series, buscadas: set[str]) -> np.ndarray:
+    """Diz, para cada linha, se ``município|chave`` está no conjunto buscado.
+
+    A concatenação em UMA string por linha existe para que o teste de
+    pertinência possa ser feito por `Series.isin`, que resolve tudo em código
+    compilado. A versão anterior montava uma tupla Python e consultava um `set`
+    por linha, o que somava ~33 milhões de operações no interpretador ao longo
+    dos três estados e dominava o tempo da etapa.
+
+    Args:
+        municipio: código IBGE do município de cada endereço.
+        chave: CEP ou chave de logradouro, alinhada com `municipio`.
+        buscadas: chaves compostas procuradas, no formato ``"município|chave"``.
+
+    Returns:
+        Vetor booleano do tamanho da entrada.
+    """
+    composta = municipio + SEPARADOR_CHAVE + chave
+    return composta.isin(buscadas).fillna(False).to_numpy(dtype=bool)
+
+
 def _reter_do_lote(
     lote: pd.DataFrame,
-    chaves_cep: set[tuple[str, str]],
-    chaves_logr: set[tuple[str, str]],
+    chaves_cep: set[str],
+    chaves_logr: set[str],
     retidos_cep: list[pd.DataFrame],
     retidos_logr: list[pd.DataFrame],
 ) -> tuple[list[pd.DataFrame], list[pd.DataFrame]]:
@@ -459,8 +544,8 @@ def _reter_do_lote(
 
     Args:
         lote: um bloco do CSV já em DataFrame, com `COLUNAS_CNEFE`.
-        chaves_cep: pares ``(município, CEP)`` buscados.
-        chaves_logr: pares ``(município, chave de logradouro)`` buscados.
+        chaves_cep: chaves ``"município|CEP"`` buscadas.
+        chaves_logr: chaves ``"município|chave de logradouro"`` buscadas.
         retidos_cep: acumulador das linhas que casaram por CEP.
         retidos_logr: acumulador das linhas que casaram por logradouro.
 
@@ -477,10 +562,7 @@ def _reter_do_lote(
     numero = pd.to_numeric(lote["NUM_ENDERECO"], errors="coerce")
 
     cep = _somente_digitos(lote["CEP"])
-    par_cep = list(zip(municipio, cep))
-    marca_cep = np.fromiter(
-        (par in chaves_cep for par in par_cep), dtype=bool, count=len(lote)
-    )
+    marca_cep = _pertence(municipio, cep, chaves_cep)
 
     nome_completo = (
         lote["NOM_TIPO_SEGLOGR"].astype("string").fillna("") + " "
@@ -488,10 +570,7 @@ def _reter_do_lote(
         + lote["NOM_SEGLOGR"].astype("string").fillna("")
     )
     chave = _chaves_de_serie(nome_completo)
-    par_logr = list(zip(municipio, chave))
-    marca_logr = np.fromiter(
-        (par in chaves_logr for par in par_logr), dtype=bool, count=len(lote)
-    )
+    marca_logr = _pertence(municipio, chave, chaves_logr)
 
     if marca_cep.any():
         retidos_cep.append(
@@ -570,9 +649,9 @@ def construir_indice(
         chaves correspondentes, com colunas ``lat`` e ``lon``.
     """
     com_cep = alvo[alvo["cep8"] != ""]
-    chaves_cep = set(zip(com_cep["municipio_ibge"], com_cep["cep8"]))
+    chaves_cep = set(com_cep["municipio_ibge"] + SEPARADOR_CHAVE + com_cep["cep8"])
     com_logr = alvo[alvo["chave_logr"] != ""]
-    chaves_logr = set(zip(com_logr["municipio_ibge"], com_logr["chave_logr"]))
+    chaves_logr = set(com_logr["municipio_ibge"] + SEPARADOR_CHAVE + com_logr["chave_logr"])
 
     _LOGGER.info(
         "Buscando %d chave(s) de CEP e %d de logradouro no CNEFE.",
@@ -658,14 +737,21 @@ def casar_com_cnefe(
     cep_especifico = np.where(
         resultado["cep_generico"].to_numpy(), "", resultado["cep8"].astype(str)
     )
-    cep_qualquer = resultado["cep8"].astype(str).to_numpy()
+    # Só os genéricos: um CEP específico que chegou até a última regra já foi
+    # recusado pela regra 3 com esta mesma chave e este mesmo índice, então
+    # reconsultá-lo é trabalho garantidamente perdido. Restringir aqui também
+    # deixa explícito no código que a última regra é a dos CEP terminados em
+    # -000, que é o que o nível `localidade` significa.
+    cep_generico_apenas = np.where(
+        resultado["cep_generico"].to_numpy(), resultado["cep8"].astype(str), ""
+    )
 
     regras = [
         ("cep_num", [municipio, cep_especifico, numero], PRECISAO_ENDERECO),
         ("logr_num", [municipio, chave_logr, numero], PRECISAO_ENDERECO),
         ("cep", [municipio, cep_especifico], PRECISAO_LOGRADOURO),
         ("logr", [municipio, chave_logr], PRECISAO_LOGRADOURO),
-        ("cep", [municipio, cep_qualquer], PRECISAO_LOCALIDADE),
+        ("cep", [municipio, cep_generico_apenas], PRECISAO_LOCALIDADE),
     ]
 
     for nome_indice, partes_chave, nivel in regras:
@@ -851,6 +937,48 @@ RAIO_DESEMPATE_M = {
 METROS_POR_GRAU = 111_320.0
 
 
+def reverter_desempate_invalido(
+    depois: pd.DataFrame,
+    antes: pd.DataFrame,
+    malha: gpd.GeoDataFrame,
+) -> pd.DataFrame:
+    """Desfaz o deslocamento em leque que tirou o ponto do próprio município.
+
+    `desempatar_coincidentes` é a ÚLTIMA coisa a mexer nas coordenadas, e mexe
+    depois de `posicionar_no_municipio` já ter conferido cada uma contra o
+    polígono. Sem esta função a garantia registrada no cabeçalho do módulo
+    valeria para coordenadas que não são as gravadas: um ponto junto à divisa
+    pode ser empurrado para fora dela pelos até 120 m do leque.
+
+    Reverter, e não recolocar no município: a coordenada de origem já passou
+    pela conferência, então voltar a ela é sempre seguro. O custo é o ponto
+    revertido voltar a coincidir com o irmão dele, que é exatamente a situação
+    que existia antes de haver leque — pior de ver, nunca errado.
+
+    Args:
+        depois: saída de `desempatar_coincidentes`.
+        antes: as mesmas linhas, na mesma ordem, antes do deslocamento.
+        malha: agregado com `municipio_ibge` e geometria.
+
+    Returns:
+        Uma CÓPIA de `depois` com as coordenadas revertidas onde foi preciso.
+    """
+    fora = ~conferir_dentro_do_municipio(depois, malha)
+    if not bool(fora.any()):
+        return depois
+
+    resultado = depois.copy()
+    resultado.loc[fora, ["latitude", "longitude"]] = antes.loc[
+        fora, ["latitude", "longitude"]
+    ].to_numpy()
+    _LOGGER.warning(
+        "%d ponto(s) saíram do próprio município ao serem abertos em leque; "
+        "deslocamento revertido.",
+        int(fora.sum()),
+    )
+    return resultado
+
+
 def desempatar_coincidentes(pontos: pd.DataFrame) -> pd.DataFrame:
     """Abre em leque os pontos que ficaram na mesma coordenada exata.
 
@@ -868,8 +996,12 @@ def desempatar_coincidentes(pontos: pd.DataFrame) -> pd.DataFrame:
         Uma CÓPIA de `pontos` com `latitude`/`longitude` ajustadas.
     """
     resultado = pontos.copy()
-    grupo = resultado.groupby(["latitude", "longitude"], sort=False).cumcount()
-    tamanho = resultado.groupby(["latitude", "longitude"], sort=False)["latitude"].transform("size")
+    # Um único groupby para os dois derivados: `indice` e `total` PRECISAM vir
+    # do mesmo agrupamento para ficarem alinhados, e agrupar duas vezes deixa
+    # esse acoplamento à mercê de uma edição futura que altere só uma das duas.
+    coincidentes = resultado.groupby(["latitude", "longitude"], sort=False)
+    grupo = coincidentes.cumcount()
+    tamanho = coincidentes["latitude"].transform("size")
 
     precisa = (tamanho > 1) & (grupo > 0)
     if not precisa.any():
@@ -945,10 +1077,11 @@ def executar(
     indice = construir_indice(alvo, usar_cache=usar_cache)
     casados = casar_com_cnefe(alvo, indice)
     posicionados = posicionar_no_municipio(casados, malha)
-    final = desempatar_coincidentes(posicionados)
+    espalhados = desempatar_coincidentes(posicionados)
+    final = reverter_desempate_invalido(espalhados, posicionados, malha)
 
     destino.parent.mkdir(parents=True, exist_ok=True)
-    final.to_parquet(destino, index=False)
+    final.drop(columns=COLUNAS_DE_TRABALHO).to_parquet(destino, index=False)
 
     imprimir_resumo(final, destino)
     return final

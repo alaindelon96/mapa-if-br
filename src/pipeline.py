@@ -90,7 +90,7 @@ def _imprimir_tempos(duracoes: dict[str, float], total: float) -> None:
     print(f"   {'TOTAL':<34} {total:>7.1f}s\n")
 
 
-def executar(usar_cache_malha: bool = True) -> Path:
+def executar(usar_cache_malha: bool = True, usar_cache_cnefe: bool = True) -> Path:
     """Roda o pipeline completo e devolve o caminho do mapa gerado.
 
     Encadeia as cinco etapas descritas no topo do módulo, na ordem, imprimindo
@@ -106,6 +106,11 @@ def executar(usar_cache_malha: bool = True) -> Path:
             nova à API de Malhas do IBGE — necessário só quando a divisão
             territorial muda, e caro: são os três estados em qualidade
             intermediária, com o servidor do IBGE lento em horário comercial.
+        usar_cache_cnefe: quando ``True`` (padrão), reaproveita os ZIP do CNEFE
+            de ``data/raw/cnefe/``. Passe ``False`` para baixar os 580 MB de
+            novo — necessário se o IBGE publicar uma revisão do cadastro, ou
+            para se recuperar de um arquivo corrompido em cache sem ter de
+            apagá-lo à mão.
 
     Returns:
         O caminho do HTML gravado (``output/mapa_if_sul.html``).
@@ -131,7 +136,7 @@ def executar(usar_cache_malha: bool = True) -> Path:
     duracoes["3. Agregação"] = time.perf_counter() - marco
 
     marco = _abrir_etapa(4, "Geocodificação dos pontos pelo CNEFE")
-    cnefe.executar(usar_cache=True)
+    cnefe.executar(usar_cache=usar_cache_cnefe)
     duracoes["4. Geocodificação"] = time.perf_counter() - marco
 
     marco = _abrir_etapa(5, "Mapa interativo")
