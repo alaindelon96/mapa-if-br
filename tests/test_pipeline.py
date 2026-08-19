@@ -20,7 +20,7 @@ inexistente.
 """
 
 import re
-from datetime import datetime
+from datetime import UTC, datetime
 
 import geopandas as gpd
 import pandas as pd
@@ -218,7 +218,13 @@ def test_agregado_nao_e_mais_antigo_que_o_dataset():
     mtime_agregado = config.ARQUIVO_AGREGADO_MUNICIPIO.stat().st_mtime
 
     def _quando(timestamp: float) -> str:
-        return datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d %H:%M:%S")
+        # `astimezone()` sem argumento adota o fuso local, que é o que se quer
+        # aqui: a mensagem é lida por quem está na máquina que gerou o arquivo.
+        return (
+            datetime.fromtimestamp(timestamp, tz=UTC)
+            .astimezone()
+            .strftime("%Y-%m-%d %H:%M:%S")
+        )
 
     atraso = mtime_pontos - mtime_agregado
     assert mtime_agregado >= mtime_pontos - TOLERANCIA_CHECKOUT_S, (

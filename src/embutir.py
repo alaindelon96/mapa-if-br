@@ -79,6 +79,42 @@ _PADRAO_URL_CSS = re.compile(r"""url\(\s*(["']?)(?!data:)([^"')]+)\1\s*\)""")
 TIMEOUT = 30
 
 
+def _ler(caminho: Path) -> str:
+    """Lê o HTML sem deixar o Python traduzir quebra de linha.
+
+    A leitura é por BYTES, e não por `read_text`, porque o modo texto faz
+    tradução universal de newline: todo terminador vira ``\n`` na leitura e
+    volta como o terminador do sistema na gravação. O JS minificado das
+    bibliotecas embutidas traz 734 CR SOLITÁRIOS, e esse par converteria cada
+    um em CRLF — 734 pontos do arquivo alterados sem ninguém pedir.
+
+    O prejuízo é no versionamento: o mapa é um artefato commitado, e a
+    reescrita silenciosa fazia o git enxergar o arquivo INTEIRO como
+    modificado, guardando uma cópia nova de 18 MB onde caberia um delta de
+    poucos bytes.
+
+    (`read_text` só aceita `newline=` a partir do Python 3.13; os bytes
+    funcionam em qualquer versão.)
+
+    Args:
+        caminho: o HTML.
+
+    Returns:
+        O conteúdo, exatamente como está no disco.
+    """
+    return caminho.read_bytes().decode("utf-8")
+
+
+def _gravar(caminho: Path, html: str) -> None:
+    """Grava o HTML sem tradução de quebra de linha. Ver `_ler`.
+
+    Args:
+        caminho: o HTML.
+        html: o conteúdo a gravar.
+    """
+    caminho.write_bytes(html.encode("utf-8"))
+
+
 def _nome_em_cache(url: str) -> str:
     """Deriva o nome do arquivo em cache a partir da URL.
 
@@ -178,7 +214,7 @@ def embutir_no_html(caminho: Path, usar_cache: bool = True) -> dict[str, int]:
             contrário — exatamente o tipo de divergência silenciosa que este
             projeto barra em toda etapa.
     """
-    html = caminho.read_text(encoding="utf-8")
+    html = _ler(caminho)
     tamanho_antes = len(html.encode("utf-8"))
     contagem = {"scripts": 0, "estilos": 0}
 
@@ -201,7 +237,7 @@ def embutir_no_html(caminho: Path, usar_cache: bool = True) -> dict[str, int]:
     html = _PADRAO_SCRIPT.sub(_embutir_script, html)
     html = _PADRAO_CSS.sub(_embutir_css, html)
 
-    caminho.write_text(html, encoding="utf-8")
+    _gravar(caminho, html)
     acrescimo = len(html.encode("utf-8")) - tamanho_antes
 
     _LOGGER.info(
@@ -211,6 +247,28 @@ def embutir_no_html(caminho: Path, usar_cache: bool = True) -> dict[str, int]:
         acrescimo / 1024,
     )
     return {**contagem, "bytes": acrescimo}
+
+
+#: Idioma declarado no `<html>`. O folium escreve a tag sem `lang`, e sem ele
+#: o navegador pode oferecer tradução automática de uma página que já está em
+#: português — e um leitor de tela não sabe em que língua pronunciá-la.
+IDIOMA = "pt-BR"
+
+
+def declarar_idioma(caminho: Path) -> bool:
+    """Acrescenta ``lang`` ao ``<html>`` do arquivo, se ainda não houver.
+
+    Args:
+        caminho: o HTML gravado.
+
+    Returns:
+        ``True`` se a tag foi alterada; ``False`` se ela já declarava idioma.
+    """
+    html = _ler(caminho)
+    if "<html>" not in html:
+        return False
+    _gravar(caminho, html.replace("<html>", f'<html lang="{IDIOMA}">', 1))
+    return True
 
 
 def restantes_externos(caminho: Path) -> list[str]:
@@ -227,5 +285,5 @@ def restantes_externos(caminho: Path) -> list[str]:
     Returns:
         As URLs de ``<script src>`` e ``<link rel=stylesheet>`` que restaram.
     """
-    html = caminho.read_text(encoding="utf-8")
+    html = _ler(caminho)
     return _PADRAO_SCRIPT.findall(html) + _PADRAO_CSS.findall(html)

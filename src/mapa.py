@@ -1744,7 +1744,7 @@ def _misturar(rgb: tuple[int, int, int], alvo: tuple[int, int, int], fracao: flo
     """Mistura `rgb` com `alvo` na proporção `fracao` (0 = só rgb, 1 = só alvo)."""
     return tuple(  # type: ignore[return-value]
         round(canal + (destino - canal) * fracao)
-        for canal, destino in zip(rgb, alvo)
+        for canal, destino in zip(rgb, alvo, strict=True)
     )
 
 
@@ -2388,7 +2388,7 @@ def _ordenar_sub_categorias(
 def adicionar_camadas_de_pontos(
     mapa: folium.Map,
     localizados: pd.DataFrame,
-) -> dict[str, list[str]]:
+) -> list[dict]:
     """Monta a hierarquia de camadas de ponto: grupo pai -> subgrupo por bandeira.
 
     Nível 1: um `MarkerCluster` por `categoria_if`, que é o toggle "tudo de uma
@@ -3905,6 +3905,7 @@ def gera_mapa(
     # objeto em memória. Ver `src.embutir` para o porquê de o HTML precisar
     # carregar as bibliotecas dentro de si.
     embutido = embutir.embutir_no_html(destino)
+    embutir.declarar_idioma(destino)
 
     imprimir_resumo(agregado, localizados, estrutura, destino, embutido)
     return destino
@@ -3947,7 +3948,7 @@ def imprimir_resumo(
     sem_populacao = int(agregado["populacao"].isna().sum())
     print(f"   população indisponível em {sem_populacao} município(s)\n")
 
-    print(f"-- posição dos marcadores (ver src/cnefe.py) --")
+    print("-- posição dos marcadores (ver src/cnefe.py) --")
     contagem = localizados["precisao"].value_counts()
     for nivel in cnefe.ORDEM_PRECISAO:
         quantos = int(contagem.get(nivel, 0))
