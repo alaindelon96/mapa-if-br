@@ -38,6 +38,21 @@ from src.etl_bacen import (
 #: dígito verificador). Sem `-`, sem `.0`, sem zero à esquerda faltando.
 PADRAO_CODIGO_IBGE = re.compile(r"^\d{7}$")
 
+#: Folga, em segundos, dos dois testes que comparam data de gravação.
+#:
+#: O git NÃO preserva mtime: no `clone` e no `checkout` todo arquivo recebe a
+#: hora em que foi escrito no disco, na ordem do índice — que é alfabética.
+#: "agregado_municipio.parquet" vem antes de "if_sul_categorizado.parquet",
+#: então num clone o agregado é sempre gravado PRIMEIRO e fica alguns
+#: milissegundos mais velho que o dataset que o originou.
+#:
+#: Sem folga, isso reprovava um clone recém-feito com a mensagem de artefato
+#: desatualizado — medido em dois clones do repositório: 5,8 ms e 7,5 ms de
+#: diferença. Um artefato REALMENTE esquecido está minutos, horas ou dias
+#: atrás, nunca milissegundos, então a folga separa os dois casos sem afrouxar
+#: o que o teste existe para pegar.
+TOLERANCIA_CHECKOUT_S = 60.0
+
 
 def _exigir_arquivo(caminho, comando):
     if not caminho.exists():
@@ -190,6 +205,11 @@ def test_agregado_nao_e_mais_antigo_que_o_dataset():
     Consequência prática: reescrever o agregado sem regerá-lo (um `touch`, uma
     cópia, um checkout) engana este teste. Ele pega o descuido comum — rodar
     `src.etl_bacen` e esquecer `src.agregacao` —, não adulteração deliberada.
+
+    A comparação leva a folga de `TOLERANCIA_CHECKOUT_S` porque o git não
+    preserva mtime e escreve os arquivos em ordem alfabética: num clone o
+    agregado nasce alguns milissegundos mais velho que o dataset, e sem a folga
+    um repositório recém-clonado reprovava aqui. Ver a constante.
     """
     _exigir_arquivo(config.ARQUIVO_IF_SUL_CATEGORIZADO, "python -m src.etl_bacen")
     _exigir_arquivo(config.ARQUIVO_AGREGADO_MUNICIPIO, "python -m src.agregacao")
@@ -201,7 +221,7 @@ def test_agregado_nao_e_mais_antigo_que_o_dataset():
         return datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d %H:%M:%S")
 
     atraso = mtime_pontos - mtime_agregado
-    assert mtime_agregado >= mtime_pontos, (
+    assert mtime_agregado >= mtime_pontos - TOLERANCIA_CHECKOUT_S, (
         f"{config.ARQUIVO_AGREGADO_MUNICIPIO.name} está DESATUALIZADO: gravado em "
         f"{_quando(mtime_agregado)}, {atraso:.0f}s ANTES de "
         f"{config.ARQUIVO_IF_SUL_CATEGORIZADO.name} ({_quando(mtime_pontos)}). "
@@ -375,7 +395,7 @@ def test_geocodificado_nao_e_mais_antigo_que_o_dataset():
 
     mtime_pontos = config.ARQUIVO_IF_SUL_CATEGORIZADO.stat().st_mtime
     mtime_geo = config.ARQUIVO_PONTOS_GEOCODIFICADOS.stat().st_mtime
-    assert mtime_geo >= mtime_pontos, (
+    assert mtime_geo >= mtime_pontos - TOLERANCIA_CHECKOUT_S, (
         f"{config.ARQUIVO_PONTOS_GEOCODIFICADOS.name} está DESATUALIZADO em "
         f"{mtime_pontos - mtime_geo:.0f}s em relação a "
         f"{config.ARQUIVO_IF_SUL_CATEGORIZADO.name}. "
