@@ -1447,6 +1447,13 @@ html, body {
     font: 12px/1.45 var(--fonte);
     max-height: 320px;
     overflow-y: auto;
+    /* Faixa livre à direita para a barra de rolagem. Sem ela, a barra cobre os
+       números — que são alinhados à direita e encostavam na borda do container.
+       O recuo resolve os dois tipos de barra: a clássica ocupa layout e fica
+       depois do padding; a de sobreposição é DESENHADA sobre esta faixa, e é
+       por isso que `scrollbar-gutter: stable` não serviria aqui (por
+       especificação ele não reserva nada quando a barra é de sobreposição). */
+    padding-right: 12px;
 }
 .popup-municipio h4 {
     margin: 0 0 7px;
@@ -1863,7 +1870,10 @@ def adicionar_coropletico(
             "color": COR_PETROLEO_ESCURO,
         },
         tooltip=folium.GeoJsonTooltip(fields=["tooltip_html"], labels=False, sticky=True),
-        popup=folium.GeoJsonPopup(fields=["popup_html"], labels=False, max_width=340),
+        # 352 = os 340 de largura útil + os 12 que `.popup-municipio` reserva
+        # para a barra de rolagem. Sem a compensação, o recuo comeria largura do
+        # conteúdo e a linha da população passaria a quebrar em duas.
+        popup=folium.GeoJsonPopup(fields=["popup_html"], labels=False, max_width=352),
         smooth_factor=0.5,
     )
     camada.add_to(mapa)
@@ -2543,7 +2553,9 @@ def adicionar_camadas_de_pontos(
                     # descartado em silêncio, e o filtro não teria por onde
                     # separar os pontos.
                     tags=[str(ponto["uf"])],
-                    popup=folium.Popup(_popup_ponto(ponto), max_width=300),
+                    # 312 = os 300 de largura útil + os 12 do recuo da barra,
+                    # pela mesma razão do popup do município.
+                    popup=folium.Popup(_popup_ponto(ponto), max_width=312),
                     tooltip=folium.Tooltip(_tooltip_ponto(ponto), sticky=True),
                 ).add_to(subgrupo)
 
