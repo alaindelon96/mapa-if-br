@@ -28,7 +28,11 @@ import geopandas as gpd
 import pandas as pd
 
 from src import config, ibge_malha
-from src.etl_bacen import CATEGORIA_BANCO, CATEGORIA_COOPERATIVA
+from src.etl_bacen import (
+    CATEGORIA_BANCO,
+    CATEGORIA_COOPERATIVA,
+    SUB_CATEGORIA_COOP_INDEFINIDA,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -319,6 +323,122 @@ def juntar_com_malha(
     return agregado[ordenadas + ["geometry"]]
 
 
+#: Nome da coluna que carrega, por município, quais marcas compõem a contagem
+#: de "Outra Cooperativa".
+COLUNA_DETALHE_OUTRAS = "outras_coops_detalhe"
+
+#: Separador entre as marcas dentro da célula de detalhe.
+SEPARADOR_DETALHE = " · "
+
+
+def detalhar_outras_cooperativas(pontos: pd.DataFrame) -> pd.DataFrame:
+    """Resume, por município, quais marcas formam a coluna "Outra Cooperativa".
+
+    A contagem agregada diz que um município tem N pontos de "Outra
+    Cooperativa", mas não diz de quem — e o rótulo, sozinho, sugere que a
+    informação não existe. Ela existe: cada uma dessas linhas traz a marca
+    escrita, capturada por `etl_bacen` em `marca_exibicao`. Esta função a traz
+    para o nível do município, onde o popup consegue exibi-la.
+
+    O resultado é TEXTO já formatado (``"Sisprime 3 · Credisis 1"``) e não uma
+    coluna por marca: são 16 marcas, quase todas ausentes em quase todos os
+    1.191 municípios, e uma coluna para cada encheria o agregado de zeros sem
+    responder melhor a pergunta que o popup faz — "quais estão aqui".
+
+    As marcas saem ordenadas da mais frequente para a menos, e o desempate é
+    alfabético, para que a mesma composição gere sempre o mesmo texto.
+
+    Args:
+        pontos: dataset categorizado, com `marca_exibicao`.
+
+    Returns:
+        DataFrame com `municipio_ibge` e `outras_coops_detalhe`, uma linha por
+        município que tenha ao menos um ponto de "Outra Cooperativa". Municípios
+        sem nenhum ficam de fora — `juntar_detalhe_outras` os preenche com "".
+    """
+    if "marca_exibicao" not in pontos.columns:
+        _LOGGER.warning(
+            "`marca_exibicao` ausente no dataset categorizado; o popup do "
+            "município não vai nomear as marcas de %r. Rode `python -m "
+            "src.etl_bacen` para regerar o arquivo.",
+            SUB_CATEGORIA_COOP_INDEFINIDA,
+        )
+        return pd.DataFrame(
+            {"municipio_ibge": pd.Series(dtype="string"),
+             COLUNA_DETALHE_OUTRAS: pd.Series(dtype="string")}
+        )
+
+    do_balde = pontos[pontos["sub_categoria"] == SUB_CATEGORIA_COOP_INDEFINIDA]
+    if do_balde.empty:
+        return pd.DataFrame(
+            {"municipio_ibge": pd.Series(dtype="string"),
+             COLUNA_DETALHE_OUTRAS: pd.Series(dtype="string")}
+        )
+
+    contagem = (
+        do_balde.groupby(["municipio_ibge", "marca_exibicao"])
+        .size()
+        .rename("n")
+        .reset_index()
+    )
+    contagem = contagem.sort_values(
+        ["municipio_ibge", "n", "marca_exibicao"], ascending=[True, False, True]
+    )
+
+    def _juntar(grupo: pd.DataFrame) -> str:
+        return SEPARADOR_DETALHE.join(
+            f"{marca} {int(n)}" for marca, n in zip(grupo["marca_exibicao"], grupo["n"])
+        )
+
+    detalhe = (
+        contagem.groupby("municipio_ibge", sort=False)
+        .apply(_juntar, include_groups=False)
+        .rename(COLUNA_DETALHE_OUTRAS)
+        .reset_index()
+    )
+    _LOGGER.info(
+        "Detalhamento de %r montado para %d municípios.",
+        SUB_CATEGORIA_COOP_INDEFINIDA,
+        len(detalhe),
+    )
+    return detalhe
+
+
+def juntar_detalhe_outras(
+    agregado: gpd.GeoDataFrame,
+    detalhe: pd.DataFrame,
+) -> gpd.GeoDataFrame:
+    """Acrescenta ao agregado a coluna de detalhe de "Outra Cooperativa".
+
+    Fica separada de `juntar_com_malha` porque aquela função converte TODAS as
+    colunas trazidas do merge para ``int64`` — o detalhe é texto e seria
+    quebrado por essa conversão.
+
+    Args:
+        agregado: saída de `juntar_com_malha`.
+        detalhe: saída de `detalhar_outras_cooperativas`.
+
+    Returns:
+        O agregado com `outras_coops_detalhe` preenchida; municípios sem nenhum
+        ponto de "Outra Cooperativa" recebem string vazia, nunca nulo, para que
+        o popup não precise testar `NaN`.
+
+    Raises:
+        ValueError: se o merge alterar a quantidade de municípios.
+    """
+    antes = len(agregado)
+    com_detalhe = agregado.merge(detalhe, on="municipio_ibge", how="left")
+    if len(com_detalhe) != antes:
+        raise ValueError(
+            f"O merge do detalhe alterou a contagem de municípios "
+            f"({antes} -> {len(com_detalhe)}). Há código duplicado no detalhe."
+        )
+    com_detalhe[COLUNA_DETALHE_OUTRAS] = (
+        com_detalhe[COLUNA_DETALHE_OUTRAS].fillna("").astype("string")
+    )
+    return com_detalhe
+
+
 def _conferir_totais(agregado: gpd.GeoDataFrame) -> None:
     """Valida a coerência aritmética da tabela wide.
 
@@ -545,7 +665,8 @@ def executar(
     Etapas: leitura do dataset categorizado -> contagem por município x
     categoria x sub_categoria -> pivotagem para o layout wide -> merge com a
     malha do IBGE (join direto por código, não espacial) -> conferência
-    aritmética -> relatório de cobertura -> gravação.
+    aritmética -> detalhe das marcas de "Outra Cooperativa" -> relatório de
+    cobertura -> gravação.
 
     Args:
         caminho_pontos: ``.parquet`` produzido por `etl_bacen`.
@@ -567,6 +688,13 @@ def executar(
     wide = pivotar_contagens(contagem)
     agregado = juntar_com_malha(malha, wide)
     _conferir_totais(agregado)
+
+    # Depois da conferência aritmética, de propósito: o detalhe é texto e não
+    # participa de nenhuma soma, então entra quando os números já foram
+    # validados e não há risco de ele interferir na checagem.
+    agregado = juntar_detalhe_outras(
+        agregado, detalhar_outras_cooperativas(pontos)
+    )
 
     relatar_cobertura(agregado, pontos)
     imprimir_resumo(agregado)

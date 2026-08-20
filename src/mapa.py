@@ -1478,6 +1478,16 @@ html, body {
     padding-left: 10px;
     color: var(--tinta-suave);
 }
+/* As marcas que compõem "Outra Cooperativa". Ocupa a linha inteira porque é
+   uma enumeração, não um par rótulo/valor: alinhada à direita como as demais
+   células de número, uma lista de três marcas ficaria ilegível. */
+.popup-municipio .detalhe-outras td {
+    text-align: left;
+    padding: 0 0 2px 20px;
+    color: var(--tinta-suave);
+    font-size: 11px;
+    line-height: 1.4;
+}
 .popup-municipio .indisponivel,
 .aviso-posicao {
     color: #8a6d1f;
@@ -1658,6 +1668,16 @@ def _linhas_por_bandeira(linha: pd.Series, categoria: str) -> str:
             f'<tr class="bandeira"><th>{html.escape(sub_categoria)}</th>'
             f"<td>{_formatar_inteiro(total)}</td></tr>"
         )
+        # "Outra Cooperativa" é a única bandeira que agrupa marcas distintas.
+        # Sem esta linha o popup afirmaria que há N pontos de algo sem nome,
+        # quando a fonte publica o nome de todos eles.
+        if sub_categoria == agregacao.SUB_CATEGORIA_COOP_INDEFINIDA:
+            detalhe = str(linha.get(agregacao.COLUNA_DETALHE_OUTRAS, "") or "").strip()
+            if detalhe:
+                linhas.append(
+                    '<tr class="detalhe-outras"><td colspan="2">'
+                    f"{html.escape(detalhe)}</td></tr>"
+                )
 
     if not linhas:
         return '<tr class="bandeira"><th>—</th><td>nenhum ponto</td></tr>'
@@ -2186,6 +2206,7 @@ def carregar_pontos_geocodificados(
         "precisao",
         "categoria_if",
         "sub_categoria",
+        "marca_exibicao",
         "nome_instalacao",
         "nome_instituicao",
         "tipo_instalacao",
@@ -2275,10 +2296,21 @@ def _popup_ponto(linha: pd.Series) -> str:
     """
     nome = html.escape(str(linha["nome_instalacao"]))
     instituicao = html.escape(str(linha["nome_instituicao"]))
+    marca = html.escape(_marca_do_ponto(linha))
     sub_categoria = html.escape(str(linha["sub_categoria"]))
     tipo = html.escape(str(linha["tipo_instalacao"]))
     municipio = html.escape(str(linha["municipio"]))
     uf = html.escape(str(linha["uf"]))
+
+    # Quando a marca exibida não é a bandeira, o ponto está pintado com a cor de
+    # "Outra Cooperativa" e é por esse nome que ele aparece no filtro. Dizer
+    # isso evita a contradição de um marcador rotulado "Sisprime" que some ao
+    # desmarcar uma camada chamada outra coisa.
+    filtro = (
+        ""
+        if marca == sub_categoria
+        else f'<div class="popup-secundario">no filtro: {sub_categoria}</div>'
+    )
 
     precisao = str(linha.get("precisao", cnefe.PRECISAO_MUNICIPIO))
     descricao = cnefe.DESCRICAO_PRECISAO.get(precisao, precisao)
@@ -2293,7 +2325,8 @@ def _popup_ponto(linha: pd.Series) -> str:
     return (
         '<div class="popup-municipio">'
         f"<h4>{nome}</h4>"
-        f"<div><b>{sub_categoria}</b> &middot; {tipo}</div>"
+        f"<div><b>{marca}</b> &middot; {tipo}</div>"
+        f"{filtro}"
         f'<div class="popup-secundario">{instituicao}</div>'
         f"<div style='padding-top:5px'>{_texto_endereco(linha)}<br>{municipio}/{uf}</div>"
         f'<div class="{classe}" style="padding-top:6px">'
@@ -2302,12 +2335,37 @@ def _popup_ponto(linha: pd.Series) -> str:
     )
 
 
+def _marca_do_ponto(linha: pd.Series) -> str:
+    """Devolve o nome de marca a exibir para um ponto.
+
+    Prefere `marca_exibicao`, que nomeia as cooperativas agrupadas sob "Outra
+    Cooperativa" (ver `etl_bacen._nomear_marca_exibicao`), e cai em
+    `sub_categoria` quando a coluna não existe — o que acontece com um Parquet
+    gerado antes de a coluna passar a existir.
+
+    Args:
+        linha: uma linha de `carregar_pontos_geocodificados`.
+
+    Returns:
+        O nome comercial, ou a bandeira quando não há marca própria.
+    """
+    marca = linha.get("marca_exibicao")
+    if marca is None or pd.isna(marca) or not str(marca).strip():
+        return str(linha["sub_categoria"])
+    return str(marca)
+
+
 def _tooltip_ponto(linha: pd.Series) -> str:
     """Monta o identificador que aparece ao passar o mouse sobre um ponto.
 
     Curto de propósito: o tooltip segue o cursor e some, então ele responde só
-    "o que é este ponto" — bandeira e nome da instalação. O resto está no popup,
+    "o que é este ponto" — marca e nome da instalação. O resto está no popup,
     a um clique.
+
+    A marca vem de `marca_exibicao`, e não de `sub_categoria`: para as 99 linhas
+    que o filtro agrupa em "Outra Cooperativa", aquele rótulo apagava um nome
+    que a fonte publica. Quando os dois diferem, a bandeira do filtro aparece
+    entre parênteses, para que o rótulo do tooltip case com o da legenda.
 
     Args:
         linha: uma linha de `carregar_pontos_geocodificados`.
@@ -2315,8 +2373,15 @@ def _tooltip_ponto(linha: pd.Series) -> str:
     Returns:
         O HTML do tooltip.
     """
+    marca = _marca_do_ponto(linha)
+    sub_categoria = str(linha["sub_categoria"])
+    sufixo = (
+        ""
+        if marca == sub_categoria
+        else f' <span class="popup-secundario">({html.escape(sub_categoria)})</span>'
+    )
     return (
-        f'<b>{html.escape(str(linha["sub_categoria"]))}</b> &middot; '
+        f"<b>{html.escape(marca)}</b>{sufixo} &middot; "
         f'{html.escape(str(linha["tipo_instalacao"]))}<br>'
         f'{html.escape(str(linha["nome_instalacao"]))}'
     )

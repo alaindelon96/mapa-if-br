@@ -63,12 +63,68 @@ Do lado cooperativo entram **todos os sistemas**, filiados ou independentes.
 Os identificados por bandeira própria hoje são Sicredi, Sicoob, Cresol, Unicred,
 Uniprime, Sulcredi, Credicoamo e Ailos; qualquer cooperativa que não case com
 nenhum deles permanece no dataset sob o rótulo `Outra Cooperativa` — ela **não é
-descartada**, apenas não tem bandeira reconhecida.
+descartada**, apenas não tem bandeira própria no filtro.
 
 O **Sistema Ailos** é identificado por **CNPJ**, e não pelo nome: nenhuma
 razão social publicada pelo BACEN contém a string "AILOS" — cada filiada assina
 com marca própria (Viacredi, Transpocred, Únilos...). A relação de filiadas está
 em `config.CNPJS_AILOS`.
+
+#### Como a bandeira é decidida
+
+São três etapas, "primeira que casar vence", em `etl_bacen.classificar_sub_categoria`:
+
+| # | Critério | Onde está a regra |
+|---|---|---|
+| 1 | **filiação por raiz de CNPJ** — critério declarado, tem precedência | `REGRAS_BANDEIRA_POR_CNPJ` |
+| 2 | **marca escrita na razão social** (`NOME INSTITUIÇÃO`) | `REGRAS_BANDEIRA_COOPERATIVA` |
+| 3 | **marca escrita no nome da instalação** (`NOME INSTALAÇÃO`) | `REGRAS_BANDEIRA_POR_INSTALACAO` |
+
+A etapa 3 existe porque há cooperativas filiadas a um sistema que **não escrevem
+a marca na razão social**, mas batizam cada posto com ela. Na safra 202606 são
+quatro no Sul, todas Sicoob, somando **57 pontos** — entre elas a
+`COOPERATIVA DE ECONOMIA E CRÉDITO MÚTUO DOS MILITARES ESTADUAIS DE SANTA
+CATARINA - CREDPOM`, cujos postos se chamam `SICOOB PA - JOINVILLE`,
+`SICOOB PA - LAGES` e assim por diante. Lendo só a razão social, o mapa exibia
+"Outra Cooperativa" na legenda logo acima de um nome que dizia "SICOOB".
+
+O critério continua sendo o mesmo — a marca precisa estar **escrita num campo
+publicado pelo BACEN**, sem inferência externa. O que mudou foi o número de
+campos lidos: dois em vez de um.
+
+#### `marca_exibicao`: o nome por trás de "Outra Cooperativa"
+
+Depois das três etapas sobram, na safra 202606, **99 pontos** em
+`Outra Cooperativa` — e **nenhum deles é anônimo**: os 99 pertencem a 16
+sistemas, todos com a marca escrita (Sisprime 34, Lar Credi 18, Credi&Gente 12,
+Credisis 8, Crediseara 5, e mais onze com 1 a 4 pontos cada).
+
+O projeto trata isso separando dois papéis que estavam na mesma coluna:
+
+- **`sub_categoria`** continua sendo a chave do **filtro, da legenda e da cor**.
+  `Outra Cooperativa` segue existindo ali, agrupando os sistemas pequenos —
+  promover cada um a bandeira própria encheria o painel de linhas de 1 ponto;
+- **`marca_exibicao`** é o nome **exibido ao leitor**. Vale o nome comercial
+  (`Sisprime`, `Credisis`...) para as linhas do balde, e é igual a
+  `sub_categoria` para todo o resto.
+
+Onde `marca_exibicao` aparece:
+
+| Superfície | O que mostra |
+|---|---|
+| tooltip do ponto | `**Sisprime** (Outra Cooperativa) · Posto de Atendimento` |
+| popup do ponto | a marca no título, e `no filtro: Outra Cooperativa` abaixo |
+| popup do município | sob a linha `Outra Cooperativa`, a composição: `Sisprime 3 · Credisis 1` |
+
+A lista está em `etl_bacen.MARCAS_OUTRAS_COOPERATIVAS` e é avaliada **somente
+sobre as linhas que sobraram** como `Outra Cooperativa`, o que torna impossível
+ela mexer em qualquer bandeira reconhecida.
+
+> Estes rótulos dizem **qual marca a linha exibe**, não a que central ela
+> pertence. Credisis e Sisprime são centrais, e alguma dessas cooperativas pode
+> ser filiada a um sistema já reconhecido sem escrever a marca em campo nenhum —
+> como acontecia com o Ailos, resolvido só por lista de CNPJ declarada pela
+> própria central.
 
 ### Está fora
 
@@ -289,8 +345,16 @@ As três fontes têm datas diferentes, e o mapa as sobrepõe assim mesmo:
 - a filiação ao **Ailos** depende da lista de CNPJ em `config.CNPJS_AILOS`,
   fornecida pela Central. Uma filiação nova não aparece até a lista ser
   atualizada à mão;
-- as demais bandeiras são reconhecidas pela **marca escrita na razão social**.
-  Cooperativa que não escreva a marca no nome cai em `Outra Cooperativa`;
+- as demais bandeiras são reconhecidas pela **marca escrita na razão social ou
+  no nome da instalação**. Cooperativa que não escreva a marca em nenhum dos
+  dois cai em `Outra Cooperativa`. O critério é textual: uma filiação real que
+  não apareça escrita em campo nenhum continua invisível para a regra, e só uma
+  lista de CNPJ declarada pela central resolve — foi o caso do Ailos;
+- `MARCAS_OUTRAS_COOPERATIVAS` **nomeia**, mas não reclassifica: ela alimenta
+  `marca_exibicao` para o tooltip e o popup, e não muda filtro, cor nem
+  contagem. Um sistema novo que apareça em safra futura fica sem nome no popup
+  até ser acrescentado à lista — o resumo de `python -m src.etl_bacen` imprime
+  quantas linhas ficaram nessa situação;
 - a lista dos cinco bancos usa **igualdade exata**. Se o BACEN mudar a grafia de
   uma razão social, aquele banco desaparece do recorte — o teste
   `test_sub_categoria_banco_so_tem_os_cinco_alvos` existe para pegar isso.

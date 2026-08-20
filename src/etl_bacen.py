@@ -193,6 +193,67 @@ REGRAS_BANDEIRA_COOPERATIVA = [
     ("Ailos", r"\bAILOS\b"),
 ]
 
+#: ETAPA 3 das regras de bandeira: a mesma marca, procurada no NOME DA
+#: INSTALAÇÃO em vez da razão social.
+#:
+#: Por que existe: há cooperativas filiadas a um sistema que NÃO escrevem a
+#: marca na razão social, mas batizam cada posto com ela. Na safra 202606 são
+#: quatro no Sul, todas Sicoob, somando 57 pontos — entre elas a
+#: "COOPERATIVA DE ECONOMIA E CRÉDITO MÚTUO DOS MILITARES ESTADUAIS DE SANTA
+#: CATARINA - CREDPOM", cujos postos se chamam "SICOOB PA - JOINVILLE",
+#: "SICOOB PA - LAGES" e assim por diante. Lendo só a razão social, elas caíam
+#: em `SUB_CATEGORIA_COOP_INDEFINIDA` e o mapa exibia "Outra Cooperativa" na
+#: legenda logo acima de um nome que dizia "SICOOB".
+#:
+#: O critério continua sendo o MESMO de sempre — a marca precisa estar escrita
+#: num campo publicado pelo BACEN — e continua sem inferência externa. O que
+#: muda é o número de campos lidos: dois em vez de um. A etapa roda DEPOIS da
+#: razão social para que esta continue tendo precedência.
+#:
+#: Conferido na safra 202606: nenhuma linha já classificada por CNPJ ou por
+#: razão social tem, no nome da instalação, marca DIFERENTE da que recebeu —
+#: zero conflitos —, então esta etapa só preenche vazios, nunca reclassifica.
+REGRAS_BANDEIRA_POR_INSTALACAO = REGRAS_BANDEIRA_COOPERATIVA
+
+#: Marcas que permanecem sob `SUB_CATEGORIA_COOP_INDEFINIDA` no FILTRO do mapa,
+#: mas que são nomeadas para o leitor em `marca_exibicao`.
+#:
+#: Decisão de escopo: "Outra Cooperativa" segue existindo como categoria de
+#: filtro e de legenda — são 16 sistemas de 1 a 34 pontos cada, e promover cada
+#: um a bandeira própria encheria o painel de linhas de 1 ponto. Mas o rótulo
+#: sozinho apagava informação que a fonte publica: nenhuma dessas linhas é
+#: anônima, todas trazem a marca escrita. Então a marca viaja em coluna própria
+#: e aparece no tooltip do ponto e no popup do município, sem virar bandeira.
+#:
+#: O casamento é textual e roda SOMENTE sobre as linhas que sobraram como
+#: `SUB_CATEGORIA_COOP_INDEFINIDA`, o que torna impossível esta lista mexer em
+#: qualquer bandeira reconhecida. Como as demais regras, é avaliada na ordem e
+#: a primeira que casar vence.
+#:
+#: Estes NÃO são juízos de filiação: dizem qual marca a linha exibe, não a que
+#: central ela pertence. Credisis e Sisprime são centrais, e alguma destas pode
+#: ser filiada a um sistema já reconhecido sem escrever a marca em campo
+#: nenhum — como acontecia com o Ailos, que só foi resolvido por lista de CNPJ
+#: declarada pela própria central (ver `config.CNPJS_AILOS`).
+MARCAS_OUTRAS_COOPERATIVAS = [
+    ("Sisprime", r"\bSISPRIME\b"),
+    ("Lar Credi", r"\bLAR CREDI\b"),
+    ("Credi&Gente", r"\bCREDI&GENTE\b"),
+    ("Credisis", r"\bCREDISIS\b"),
+    ("Crediseara", r"\bCREDISEARA\b"),
+    ("Greencred", r"\bGREENCRED\b"),
+    ("Servicoop", r"\bSERVICOOP\b"),
+    ("Minuano", r"\bMINUANO\b"),
+    ("Crehnor", r"\bCREHNOR\b"),
+    ("Coopavel", r"\bCOOPAVEL\b"),
+    ("Cooperforte", r"\bCOOPERFORTE\b"),
+    ("Cogem", r"\bCOGEM\b"),
+    ("Credicebrace", r"\bCREDICEBRACE\b|\bCEBRACE\b"),
+    ("Coopesf", r"\bCOOPESF\b"),
+    ("Coopnore", r"\bCOOPNORE\b"),
+    ("Coopcrece", r"\bCOOPCRECE\b"),
+]
+
 
 # --------------------------------------------------------------------------- #
 # Helpers de normalização de texto
@@ -684,10 +745,72 @@ def classificar_sub_categoria(df: pd.DataFrame) -> pd.DataFrame:
         resultado.loc[casa, "sub_categoria"] = bandeira
         pendente = pendente & ~casa
 
+    # Etapa 3 — a mesma marca, escrita no nome da instalação. Só alcança quem
+    # as duas etapas anteriores não classificaram, então nunca reclassifica.
+    instalacao_para_match = _dobrar_acentos(resultado["nome_instalacao"])
+    for bandeira, padrao in REGRAS_BANDEIRA_POR_INSTALACAO:
+        casa = pendente & instalacao_para_match.str.contains(
+            padrao, regex=True, na=False
+        )
+        resultado.loc[casa, "sub_categoria"] = bandeira
+        pendente = pendente & ~casa
+
     # Cooperativas sem nenhuma marca reconhecida no nome.
     resultado.loc[pendente, "sub_categoria"] = SUB_CATEGORIA_COOP_INDEFINIDA
 
     resultado["sub_categoria"] = resultado["sub_categoria"].astype("string")
+    return _nomear_marca_exibicao(resultado, pendente, nome_para_match, instalacao_para_match)
+
+
+def _nomear_marca_exibicao(
+    df: pd.DataFrame,
+    indefinidas: pd.Series,
+    razao_social: pd.Series,
+    instalacao: pd.Series,
+) -> pd.DataFrame:
+    """Cria `marca_exibicao`: o nome de marca que o mapa mostra ao leitor.
+
+    A coluna existe porque `sub_categoria` passou a ter dois trabalhos
+    incompatíveis. Ela é a chave do FILTRO e da legenda — e por isso precisa de
+    poucos valores estáveis, com "Outra Cooperativa" agrupando os sistemas
+    pequenos. Mas ela também era o texto exibido, e aí "Outra Cooperativa"
+    apagava um nome que a fonte publica: as 99 linhas assim rotuladas na safra
+    202606 pertencem a 16 sistemas, todos com a marca escrita.
+
+    `marca_exibicao` resolve o conflito separando os papéis:
+
+    * bancos e cooperativas com bandeira reconhecida -> igual a `sub_categoria`,
+      de modo que quem lê a coluna não precisa saber se o caso é especial;
+    * cooperativas indefinidas cuja marca casou com `MARCAS_OUTRAS_COOPERATIVAS`
+      -> o nome comercial (``"Sisprime"``, ``"Credisis"``...);
+    * o que sobrar -> ``"Outra Cooperativa"``, que aqui é afirmação verdadeira:
+      nenhuma marca conhecida está escrita.
+
+    `sub_categoria` não é tocada, então o filtro, a legenda, as colunas da
+    agregação e a conferência de totais continuam exatamente como estavam.
+
+    Args:
+        df: DataFrame com `sub_categoria` já preenchida.
+        indefinidas: máscara das linhas que ficaram sem bandeira reconhecida.
+        razao_social: `nome_instituicao` em caixa alta e sem acentos.
+        instalacao: `nome_instalacao` em caixa alta e sem acentos.
+
+    Returns:
+        Cópia do DataFrame com a coluna `marca_exibicao`.
+    """
+    resultado = df.copy()
+    resultado["marca_exibicao"] = resultado["sub_categoria"]
+
+    pendente = indefinidas.copy()
+    for marca, padrao in MARCAS_OUTRAS_COOPERATIVAS:
+        casa = pendente & (
+            razao_social.str.contains(padrao, regex=True, na=False)
+            | instalacao.str.contains(padrao, regex=True, na=False)
+        )
+        resultado.loc[casa, "marca_exibicao"] = marca
+        pendente = pendente & ~casa
+
+    resultado["marca_exibicao"] = resultado["marca_exibicao"].astype("string")
     return resultado
 
 
@@ -813,7 +936,39 @@ def imprimir_resumo(df: pd.DataFrame, top_indefinidas: int = 15) -> None:
         f"{indefinidas['nome_instituicao'].nunique()} instituições distintas"
     )
     print("=" * 78)
-    if len(indefinidas):
+
+    # Dentro do balde há marcas nomeadas (`marca_exibicao`) e, possivelmente,
+    # linhas que nenhuma regra alcançou. As duas situações pedem ações
+    # diferentes — a primeira só confirma o de-para, a segunda pede regra nova —
+    # então elas são impressas separadamente, e não como uma lista só.
+    if len(indefinidas) and "marca_exibicao" in indefinidas.columns:
+        nomeadas = indefinidas[
+            indefinidas["marca_exibicao"] != SUB_CATEGORIA_COOP_INDEFINIDA
+        ]
+        print(
+            f"Com marca nomeada em `marca_exibicao` (aparecem no mapa pelo nome, "
+            f"mas filtram como \"{SUB_CATEGORIA_COOP_INDEFINIDA}\"): "
+            f"{len(nomeadas)} linhas"
+        )
+        if len(nomeadas):
+            print(nomeadas["marca_exibicao"].value_counts().to_string())
+
+        anonimas = indefinidas[
+            indefinidas["marca_exibicao"] == SUB_CATEGORIA_COOP_INDEFINIDA
+        ]
+        print(
+            f"\nSem NENHUMA marca reconhecida (nem bandeira, nem "
+            f"MARCAS_OUTRAS_COOPERATIVAS): {len(anonimas)} linhas"
+        )
+        if len(anonimas):
+            print(f"Top {top_indefinidas} nomes para revisão das regras:")
+            print(
+                anonimas["nome_instituicao"]
+                .value_counts()
+                .head(top_indefinidas)
+                .to_string()
+            )
+    elif len(indefinidas):
         print(f"Top {top_indefinidas} nomes sem bandeira reconhecida:")
         print(
             indefinidas["nome_instituicao"]
