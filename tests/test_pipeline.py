@@ -4,14 +4,20 @@ Diferente de `test_estrutura.py`, que é fumaça sobre o código, aqui os testes
 leem os dois Parquet já gravados em ``data/processed/`` e verificam invariantes
 do RESULTADO:
 
-* `if_sul_categorizado.parquet` — o recorte não deixou vazar nada que não fosse
-  cooperativa de crédito ou um dos cinco bancos-alvo, e todo código IBGE está no
-  padrão de 7 dígitos;
-* `agregado_municipio.parquet` — foi gravado depois do dataset que o originou, a
-  agregação não perdeu nenhum ponto no join com a malha, e não há município
-  repetido;
-* `pontos_geocodificados.parquet` — todo ponto tem coordenada, ela cai dentro
-  do retângulo do Sul, e o nível de precisão declarado é um dos previstos.
+* `if_<recorte>_categorizado.parquet` — o recorte não deixou vazar nada que não
+  fosse cooperativa de crédito ou um dos cinco bancos-alvo, e todo código IBGE
+  está no padrão de 7 dígitos;
+* `agregado_municipio_<recorte>.parquet` — foi gravado depois do dataset que o
+  originou, a agregação não perdeu nenhum ponto no join com a malha, e não há
+  município repetido;
+* `pontos_geocodificados_<recorte>.parquet` — todo ponto tem coordenada, ela
+  cai dentro do retângulo do recorte, e o nível de precisão declarado é um dos
+  previstos.
+
+QUAL recorte é lido: o ATIVO (`config.SIGLAS_UF`), que sem nada é a Região Sul.
+Para conferir os artefatos de outro recorte, rode
+``MAPA_IF_UFS=BR pytest`` — ver `config.VARIAVEL_RECORTE`. Os testes nunca
+misturam recortes: os caminhos e os valores esperados saem todos do mesmo.
 
 Os arquivos são pré-requisito: rode ``python -m src.etl_bacen``,
 ``python -m src.agregacao`` e ``python -m src.cnefe`` antes. Sem eles os testes
@@ -42,7 +48,7 @@ PADRAO_CODIGO_IBGE = re.compile(r"^\d{7}$")
 #:
 #: O git NÃO preserva mtime: no `clone` e no `checkout` todo arquivo recebe a
 #: hora em que foi escrito no disco, na ordem do índice — que é alfabética.
-#: "agregado_municipio.parquet" vem antes de "if_sul_categorizado.parquet",
+#: "agregado_municipio_sul.parquet" vem antes de "if_sul_categorizado.parquet",
 #: então num clone o agregado é sempre gravado PRIMEIRO e fica alguns
 #: milissegundos mais velho que o dataset que o originou.
 #:
@@ -65,8 +71,8 @@ def _exigir_arquivo(caminho, comando):
 @pytest.fixture(scope="module")
 def pontos() -> pd.DataFrame:
     """Dataset categorizado do BACEN: uma linha por ponto de atendimento."""
-    _exigir_arquivo(config.ARQUIVO_IF_SUL_CATEGORIZADO, "python -m src.etl_bacen")
-    return pd.read_parquet(config.ARQUIVO_IF_SUL_CATEGORIZADO)
+    _exigir_arquivo(config.arquivo_if_categorizado(), "python -m src.etl_bacen")
+    return pd.read_parquet(config.arquivo_if_categorizado())
 
 
 @pytest.fixture(scope="module")
@@ -76,8 +82,8 @@ def agregado() -> pd.DataFrame:
     Lido com `pandas` (e não `geopandas`) de propósito: os testes olham só as
     colunas de contagem, e a geometria não precisa ser desserializada.
     """
-    _exigir_arquivo(config.ARQUIVO_AGREGADO_MUNICIPIO, "python -m src.agregacao")
-    return pd.read_parquet(config.ARQUIVO_AGREGADO_MUNICIPIO)
+    _exigir_arquivo(config.arquivo_agregado_municipio(), "python -m src.agregacao")
+    return pd.read_parquet(config.arquivo_agregado_municipio())
 
 
 # --------------------------------------------------------------------------- #
@@ -102,10 +108,12 @@ def test_categoria_if_so_tem_cooperativa_e_banco(pontos):
     )
 
     # O recorte territorial é parte do mesmo filtro: se caiu UF de fora, o
-    # "dataset filtrado RS+SC+PR" não é o que o nome diz.
+    # dataset não é o recorte que o nome do arquivo diz.
     ufs = set(pontos["uf"].dropna().unique())
-    assert ufs <= set(config.SIGLAS_SUL), (
-        f"UF fora da Região Sul no dataset: {sorted(ufs - set(config.SIGLAS_SUL))!r}."
+    do_recorte = set(config.SIGLAS_UF)
+    assert ufs <= do_recorte, (
+        f"UF fora do recorte {config.nome_do_recorte()} no dataset: "
+        f"{sorted(ufs - do_recorte)!r}."
     )
 
 
@@ -178,12 +186,32 @@ def test_codigo_municipio_tem_7_digitos(fonte, request):
     assert all(PADRAO_CODIGO_IBGE.match(str(c)) for c in codigo.unique())
 
 
-def test_codigos_do_agregado_pertencem_as_ufs_do_sul(agregado):
-    """Os dois primeiros dígitos do código têm de ser 41, 42 ou 43."""
+def test_codigos_do_agregado_pertencem_as_ufs_do_recorte(agregado):
+    """Os dois primeiros dígitos do código só podem ser os das UFs do recorte."""
     prefixos = set(agregado["municipio_ibge"].astype("string").str.slice(0, 2))
-    esperados = {str(codigo) for codigo in config.CODIGO_UF_SUL.values()}
+    esperados = {str(config.CODIGO_UF[uf]) for uf in config.SIGLAS_UF}
     assert prefixos <= esperados, (
-        f"Município fora do Sul na malha: prefixos {sorted(prefixos - esperados)!r}."
+        f"Município fora do recorte {config.nome_do_recorte()} na malha: "
+        f"prefixos {sorted(prefixos - esperados)!r}."
+    )
+
+
+def test_coluna_regiao_bate_com_a_uf(agregado):
+    """Todo município traz a região da sua UF, sem nulo e sem discordância.
+
+    A coluna existe para o filtro hierárquico do mapa (região -> estado). Uma
+    linha com `regiao` nula sumiria do mapa ao escolher qualquer região; uma
+    com a região errada apareceria na região errada — os dois em silêncio, já
+    que nada mais no pipeline lê essa coluna.
+    """
+    sem_regiao = int(agregado["regiao"].isna().sum())
+    assert sem_regiao == 0, f"{sem_regiao} município(s) sem `regiao`."
+
+    esperada = agregado["uf"].map(config.REGIAO_POR_UF)
+    divergentes = agregado[agregado["regiao"] != esperada]
+    assert len(divergentes) == 0, (
+        f"{len(divergentes)} município(s) com `regiao` divergente da UF. "
+        f"Exemplos: {divergentes[['municipio_nome', 'uf', 'regiao']].head().to_dict('records')!r}"
     )
 
 
@@ -211,11 +239,11 @@ def test_agregado_nao_e_mais_antigo_que_o_dataset():
     agregado nasce alguns milissegundos mais velho que o dataset, e sem a folga
     um repositório recém-clonado reprovava aqui. Ver a constante.
     """
-    _exigir_arquivo(config.ARQUIVO_IF_SUL_CATEGORIZADO, "python -m src.etl_bacen")
-    _exigir_arquivo(config.ARQUIVO_AGREGADO_MUNICIPIO, "python -m src.agregacao")
+    _exigir_arquivo(config.arquivo_if_categorizado(), "python -m src.etl_bacen")
+    _exigir_arquivo(config.arquivo_agregado_municipio(), "python -m src.agregacao")
 
-    mtime_pontos = config.ARQUIVO_IF_SUL_CATEGORIZADO.stat().st_mtime
-    mtime_agregado = config.ARQUIVO_AGREGADO_MUNICIPIO.stat().st_mtime
+    mtime_pontos = config.arquivo_if_categorizado().stat().st_mtime
+    mtime_agregado = config.arquivo_agregado_municipio().stat().st_mtime
 
     def _quando(timestamp: float) -> str:
         # `astimezone()` sem argumento adota o fuso local, que é o que se quer
@@ -228,9 +256,9 @@ def test_agregado_nao_e_mais_antigo_que_o_dataset():
 
     atraso = mtime_pontos - mtime_agregado
     assert mtime_agregado >= mtime_pontos - TOLERANCIA_CHECKOUT_S, (
-        f"{config.ARQUIVO_AGREGADO_MUNICIPIO.name} está DESATUALIZADO: gravado em "
+        f"{config.arquivo_agregado_municipio().name} está DESATUALIZADO: gravado em "
         f"{_quando(mtime_agregado)}, {atraso:.0f}s ANTES de "
-        f"{config.ARQUIVO_IF_SUL_CATEGORIZADO.name} ({_quando(mtime_pontos)}). "
+        f"{config.arquivo_if_categorizado().name} ({_quando(mtime_pontos)}). "
         "Rode `python -m src.agregacao` para reagregar sobre o dataset atual."
     )
 
@@ -304,22 +332,41 @@ def test_nao_ha_municipio_duplicado_no_agregado(agregado):
 # 6. Geocodificação dos pontos (src.cnefe)
 # --------------------------------------------------------------------------- #
 
-#: Retângulo que contém os três estados do Sul, com folga de ~0,5°, medido
-#: sobre a malha do IBGE (lon -57,65..-48,02 / lat -33,75..-22,52).
+#: Folga, em graus, do retângulo que contém o recorte.
 #:
-#: Serve para pegar a classe de erro que passaria despercebida: coordenada
-#: trocada de sinal, latitude e longitude invertidas, ou casamento com um
-#: endereço de outra região do país. O teste é grosseiro de propósito — a
-#: conferência fina, contra o polígono do município de cada ponto, é feita na
-#: própria geocodificação por `cnefe.conferir_dentro_do_municipio`.
-CAIXA_SUL = {"lon_min": -58.2, "lon_max": -47.5, "lat_min": -34.3, "lat_max": -22.0}
+#: Meio grau é ~55 km — bem mais que qualquer deslocamento em leque, e bem
+#: menos que a distância até a UF vizinha mais próxima que interessaria pegar.
+FOLGA_CAIXA_GRAUS = 0.5
+
+
+@pytest.fixture(scope="module")
+def caixa_do_recorte(agregado) -> dict[str, float]:
+    """Retângulo que contém o recorte ativo, com folga de `FOLGA_CAIXA_GRAUS`.
+
+    Sai da geometria da malha, e não de números transcritos: a versão anterior
+    era a caixa do Sul escrita à mão, que reprovaria qualquer outro recorte.
+
+    Serve para pegar a classe de erro que passaria despercebida: coordenada
+    trocada de sinal, latitude e longitude invertidas, ou casamento com um
+    endereço de outra região do país. O teste é grosseiro de propósito — a
+    conferência fina, contra o polígono do município de cada ponto, é feita na
+    própria geocodificação por `cnefe.conferir_dentro_do_municipio`.
+    """
+    malha = gpd.read_parquet(config.arquivo_agregado_municipio())
+    oeste, sul, leste, norte = malha.total_bounds
+    return {
+        "lon_min": float(oeste) - FOLGA_CAIXA_GRAUS,
+        "lon_max": float(leste) + FOLGA_CAIXA_GRAUS,
+        "lat_min": float(sul) - FOLGA_CAIXA_GRAUS,
+        "lat_max": float(norte) + FOLGA_CAIXA_GRAUS,
+    }
 
 
 @pytest.fixture(scope="module")
 def geocodificados() -> pd.DataFrame:
     """Pontos de atendimento com coordenada e nível de precisão."""
-    _exigir_arquivo(config.ARQUIVO_PONTOS_GEOCODIFICADOS, "python -m src.cnefe")
-    return pd.read_parquet(config.ARQUIVO_PONTOS_GEOCODIFICADOS)
+    _exigir_arquivo(config.arquivo_pontos_geocodificados(), "python -m src.cnefe")
+    return pd.read_parquet(config.arquivo_pontos_geocodificados())
 
 
 def test_todo_ponto_geocodificado_tem_coordenada(geocodificados, pontos):
@@ -338,16 +385,17 @@ def test_todo_ponto_geocodificado_tem_coordenada(geocodificados, pontos):
     )
 
 
-def test_coordenadas_caem_dentro_do_sul(geocodificados):
-    """Toda coordenada está no retângulo que contém RS, SC e PR."""
+def test_coordenadas_caem_dentro_do_recorte(geocodificados, caixa_do_recorte):
+    """Toda coordenada está no retângulo que contém as UFs do recorte."""
     fora = geocodificados[
-        (geocodificados["longitude"] < CAIXA_SUL["lon_min"])
-        | (geocodificados["longitude"] > CAIXA_SUL["lon_max"])
-        | (geocodificados["latitude"] < CAIXA_SUL["lat_min"])
-        | (geocodificados["latitude"] > CAIXA_SUL["lat_max"])
+        (geocodificados["longitude"] < caixa_do_recorte["lon_min"])
+        | (geocodificados["longitude"] > caixa_do_recorte["lon_max"])
+        | (geocodificados["latitude"] < caixa_do_recorte["lat_min"])
+        | (geocodificados["latitude"] > caixa_do_recorte["lat_max"])
     ]
     assert len(fora) == 0, (
-        f"{len(fora)} ponto(s) fora do retângulo do Sul. Exemplos: "
+        f"{len(fora)} ponto(s) fora do retângulo de {config.nome_do_recorte()}. "
+        f"Exemplos: "
         f"{fora[['municipio', 'uf', 'latitude', 'longitude']].head().to_dict('records')!r}"
     )
 
@@ -355,7 +403,7 @@ def test_coordenadas_caem_dentro_do_sul(geocodificados):
 def test_todo_ponto_cai_dentro_do_proprio_municipio(geocodificados):
     """A invariante forte da geocodificação: ponto no polígono do seu município.
 
-    `CAIXA_SUL` é grosseira de propósito e só pega coordenada trocada de sinal
+    `caixa_do_recorte` é grosseira de propósito e só pega coordenada trocada de sinal
     ou de outra região do país. A conferência que importa é esta: um CEP
     digitado errado na fonte casa com um endereço REAL e plausível em outra
     cidade, e nada no texto denuncia — só o polígono. `src.cnefe` rebaixa esses
@@ -363,8 +411,8 @@ def test_todo_ponto_cai_dentro_do_proprio_municipio(geocodificados):
     ou uma mudança de ordem que a torne obsoleta (o deslocamento em leque é
     aplicado depois dela), não passe despercebida.
     """
-    _exigir_arquivo(config.ARQUIVO_AGREGADO_MUNICIPIO, "python -m src.agregacao")
-    malha = gpd.read_parquet(config.ARQUIVO_AGREGADO_MUNICIPIO)
+    _exigir_arquivo(config.arquivo_agregado_municipio(), "python -m src.agregacao")
+    malha = gpd.read_parquet(config.arquivo_agregado_municipio())
 
     dentro = cnefe.conferir_dentro_do_municipio(geocodificados, malha)
     fora = geocodificados[~dentro]
@@ -396,32 +444,62 @@ def test_geocodificado_nao_e_mais_antigo_que_o_dataset():
     e esquecer `src.cnefe` deixaria o mapa desenhando os pontos da safra
     anterior.
     """
-    _exigir_arquivo(config.ARQUIVO_IF_SUL_CATEGORIZADO, "python -m src.etl_bacen")
-    _exigir_arquivo(config.ARQUIVO_PONTOS_GEOCODIFICADOS, "python -m src.cnefe")
+    _exigir_arquivo(config.arquivo_if_categorizado(), "python -m src.etl_bacen")
+    _exigir_arquivo(config.arquivo_pontos_geocodificados(), "python -m src.cnefe")
 
-    mtime_pontos = config.ARQUIVO_IF_SUL_CATEGORIZADO.stat().st_mtime
-    mtime_geo = config.ARQUIVO_PONTOS_GEOCODIFICADOS.stat().st_mtime
+    mtime_pontos = config.arquivo_if_categorizado().stat().st_mtime
+    mtime_geo = config.arquivo_pontos_geocodificados().stat().st_mtime
     assert mtime_geo >= mtime_pontos - TOLERANCIA_CHECKOUT_S, (
-        f"{config.ARQUIVO_PONTOS_GEOCODIFICADOS.name} está DESATUALIZADO em "
+        f"{config.arquivo_pontos_geocodificados().name} está DESATUALIZADO em "
         f"{mtime_pontos - mtime_geo:.0f}s em relação a "
-        f"{config.ARQUIVO_IF_SUL_CATEGORIZADO.name}. "
+        f"{config.arquivo_if_categorizado().name}. "
         "Rode `python -m src.cnefe` para regerá-lo."
     )
 
 
-def test_agregado_tem_todos_os_municipios_do_sul(agregado):
-    """1.191 municípios — a malha completa, não só os que têm atendimento.
+def test_agregado_tem_todos_os_municipios_do_recorte(agregado):
+    """A malha completa do recorte, não só os municípios que têm atendimento.
 
-    Um município a menos aqui é um buraco no coroplético, não um zero.
+    Um município a menos aqui é um buraco no coroplético, não um zero. Com o
+    recorte padrão são os 1.191 do Sul; com ``--ufs BR``, os 5.570 do país.
     """
-    esperado = sum(config.MUNICIPIOS_POR_UF_SUL.values())
+    esperado_por_uf = config.municipios_esperados()
+    esperado = sum(esperado_por_uf.values())
     assert len(agregado) == esperado, (
-        f"Agregado tem {len(agregado)} municípios; a divisão territorial vigente "
-        f"tem {esperado} no Sul ({config.MUNICIPIOS_POR_UF_SUL})."
+        f"Agregado tem {len(agregado)} municípios; a divisão territorial "
+        f"vigente tem {esperado} em {config.nome_do_recorte()}."
     )
 
     por_uf = agregado["uf"].value_counts().to_dict()
-    assert por_uf == config.MUNICIPIOS_POR_UF_SUL, (
+    assert por_uf == esperado_por_uf, (
         f"Contagem de municípios por UF divergente: {por_uf} != "
-        f"{config.MUNICIPIOS_POR_UF_SUL}."
+        f"{esperado_por_uf}."
+    )
+
+
+def test_tabela_de_municipios_soma_o_brasil():
+    """As 27 entradas de `config.MUNICIPIOS_POR_UF` somam 5.570.
+
+    Esta tabela é a barreira contra malha incompleta — é contra ela que
+    `pipeline._obter_malha` recusa uma malha com buraco. Um número errado aqui
+    não faria nada falhar: faria a barreira aprovar a malha errada, ou reprovar
+    a certa. Daí conferir a tabela contra o total oficial do país, que é o
+    único número redondo e verificável do conjunto.
+    """
+    assert set(config.MUNICIPIOS_POR_UF) == set(config.CODIGO_UF), (
+        "MUNICIPIOS_POR_UF e CODIGO_UF têm de cobrir as MESMAS 27 UFs; "
+        f"diferença: {set(config.MUNICIPIOS_POR_UF) ^ set(config.CODIGO_UF)!r}."
+    )
+    total = sum(config.MUNICIPIOS_POR_UF.values())
+    assert total == config.TOTAL_MUNICIPIOS_BR, (
+        f"A tabela soma {total} municípios; o Brasil tem "
+        f"{config.TOTAL_MUNICIPIOS_BR}."
+    )
+
+    por_regiao = {
+        regiao: sum(config.MUNICIPIOS_POR_UF[uf] for uf in ufs)
+        for regiao, ufs in config.REGIOES.items()
+    }
+    assert por_regiao["Sul"] == 1191, (
+        f"A Região Sul tem 1.191 municípios; a tabela diz {por_regiao['Sul']}."
     )

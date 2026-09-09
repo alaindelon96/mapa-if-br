@@ -1,15 +1,22 @@
-"""ETL dos cadastros de atendimento do BACEN para a Região Sul.
+"""ETL dos cadastros de atendimento do BACEN.
 
 Lê as duas planilhas publicadas pelo Banco Central (posição 30.6.2026) —
 agências e postos de atendimento —, padroniza as duas em um esquema comum,
-recorta para RS/SC/PR, mantém apenas cooperativas de crédito e os cinco
-bancos-alvo, e classifica cada ponto em `categoria_if` / `sub_categoria`.
+recorta para as UFs de `config.SIGLAS_UF`, mantém apenas cooperativas de
+crédito e os cinco bancos-alvo, e classifica cada ponto em `categoria_if` /
+`sub_categoria`.
+
+As planilhas do BACEN são NACIONAIS. O recorte territorial é decisão deste
+módulo, e de mais ninguém: `filtrar_recorte` é o único ponto do pipeline em
+que uma linha é descartada por UF.
 
 Uso (a partir da raiz do projeto, com o venv ativo)::
 
     python -m src.etl_bacen
 
-Saída: ``data/processed/if_sul_categorizado.parquet``.
+Saída: ``data/processed/if_<recorte>_categorizado.parquet`` — o nome carrega o
+slug do recorte (ver `config.arquivo_if_categorizado`), de modo que uma
+execução nacional não sobrescreve a do Sul.
 """
 
 from __future__ import annotations
@@ -521,16 +528,22 @@ def combinar_bases(agencias: pd.DataFrame, postos: pd.DataFrame) -> pd.DataFrame
 # --------------------------------------------------------------------------- #
 
 
-def filtrar_sul(df: pd.DataFrame) -> pd.DataFrame:
-    """Mantém apenas as linhas cuja UF está em `config.SIGLAS_SUL`.
+def filtrar_recorte(df: pd.DataFrame, ufs: list[str] | None = None) -> pd.DataFrame:
+    """Mantém apenas as linhas cuja UF está no recorte territorial ativo.
+
+    As duas planilhas do BACEN são NACIONAIS — trazem as 27 UFs, e é AQUI que o
+    recorte territorial acontece; nada antes desta função descarta linha por
+    território. Com `config.SIGLAS_UF` no padrão sobram RS, SC e PR; com
+    ``--ufs BR`` não sai nada, porque nada fica de fora.
 
     Args:
         df: base combinada nacional.
+        ufs: recorte explícito; ``None`` usa o ativo (`config.SIGLAS_UF`).
 
     Returns:
-        DataFrame restrito a RS, SC e PR.
+        DataFrame restrito às UFs do recorte, com o índice reiniciado.
     """
-    return df[df["uf"].isin(config.SIGLAS_SUL)].reset_index(drop=True)
+    return df[df["uf"].isin(config.recorte(ufs))].reset_index(drop=True)
 
 
 # --------------------------------------------------------------------------- #
@@ -541,12 +554,12 @@ def filtrar_sul(df: pd.DataFrame) -> pd.DataFrame:
 def diagnosticar_itau(df: pd.DataFrame) -> pd.DataFrame:
     """Imprime a contagem de linhas de "ITAÚ UNIBANCO S.A." vs. a Holding.
 
-    Roda ANTES do filtro de instituições, sobre a base combinada RS/SC/PR, para
-    permitir decidir se "ITAÚ UNIBANCO HOLDING S.A." tem pontos de atendimento
-    próprios e deveria entrar em `config.BANCOS_ALVO`.
+    Roda ANTES do filtro de instituições, sobre a base já recortada por
+    território, para permitir decidir se "ITAÚ UNIBANCO HOLDING S.A." tem
+    pontos de atendimento próprios e deveria entrar em `config.BANCOS_ALVO`.
 
     Args:
-        df: base combinada já restrita a RS/SC/PR.
+        df: base combinada já restrita ao recorte territorial.
 
     Returns:
         DataFrame com a contagem por nome de instituição e `tipo_instalacao`,
@@ -563,7 +576,10 @@ def diagnosticar_itau(df: pd.DataFrame) -> pd.DataFrame:
     )
 
     print("=" * 78)
-    print("DIAGNÓSTICO — Itaú: entidade operacional vs. holding (base RS/SC/PR)")
+    print(
+        "DIAGNÓSTICO — Itaú: entidade operacional vs. holding "
+        f"({config.nome_do_recorte()})"
+    )
     print("=" * 78)
     for nome in nomes:
         total = int((recorte["nome_instituicao"] == nome).sum())
@@ -602,7 +618,7 @@ def filtrar_instituicoes_alvo(df: pd.DataFrame) -> pd.DataFrame:
     crédito, corretoras, BNDES etc.) é descartado.
 
     Args:
-        df: base combinada já restrita a RS/SC/PR.
+        df: base combinada já restrita ao recorte territorial.
 
     Returns:
         DataFrame filtrado.
@@ -867,18 +883,20 @@ def padronizar_municipio_ibge(df: pd.DataFrame) -> pd.DataFrame:
 # --------------------------------------------------------------------------- #
 
 
-def salvar_parquet(
-    df: pd.DataFrame, caminho: Path = config.ARQUIVO_IF_SUL_CATEGORIZADO
-) -> Path:
+def salvar_parquet(df: pd.DataFrame, caminho: Path | None = None) -> Path:
     """Grava o dataset final em Parquet, criando o diretório se necessário.
 
     Args:
         df: dataset categorizado.
-        caminho: destino do arquivo ``.parquet``.
+        caminho: destino do ``.parquet``; ``None`` deriva do recorte ativo
+            (`config.arquivo_if_categorizado`). O default é resolvido aqui, e
+            não na assinatura, porque um default de parâmetro é avaliado na
+            importação do módulo — antes de a linha de comando fixar o recorte.
 
     Returns:
         O caminho gravado.
     """
+    caminho = caminho or config.arquivo_if_categorizado()
     caminho.parent.mkdir(parents=True, exist_ok=True)
     df.to_parquet(caminho, index=False)
     return caminho
@@ -989,9 +1007,9 @@ def executar() -> pd.DataFrame:
     """Roda o ETL completo, grava o Parquet e imprime os diagnósticos.
 
     Etapas: leitura das duas planilhas -> padronização no esquema comum ->
-    concatenação -> recorte RS/SC/PR -> diagnóstico Itaú -> recorte de
-    instituições -> `categoria_if` -> `sub_categoria` -> código IBGE ->
-    gravação em Parquet -> resumo.
+    concatenação -> recorte territorial (`config.SIGLAS_UF`) -> diagnóstico
+    Itaú -> recorte de instituições -> `categoria_if` -> `sub_categoria` ->
+    código IBGE -> gravação em Parquet -> resumo.
 
     Returns:
         O dataset final categorizado.
@@ -1004,17 +1022,20 @@ def executar() -> pd.DataFrame:
     )
 
     combinada = combinar_bases(agencias, postos)
-    sul = filtrar_sul(combinada)
-    print(f"Base RS/SC/PR antes do filtro de instituições: {len(sul)} linhas.\n")
+    no_recorte = filtrar_recorte(combinada)
+    print(
+        f"Base {config.nome_do_recorte()} antes do filtro de instituições: "
+        f"{len(no_recorte)} linhas.\n"
+    )
 
     # Etapa 6: diagnóstico exigido antes do recorte de instituições.
-    diagnosticar_itau(sul)
+    diagnosticar_itau(no_recorte)
 
-    alvo = filtrar_instituicoes_alvo(sul)
+    alvo = filtrar_instituicoes_alvo(no_recorte)
     print(
         f"Após o filtro de instituições (cooperativas + {len(config.BANCOS_ALVO)} "
         f"bancos-alvo): {len(alvo)} linhas "
-        f"({len(sul) - len(alvo)} descartadas).\n"
+        f"({len(no_recorte) - len(alvo)} descartadas).\n"
     )
 
     categorizado = classificar_categoria_if(alvo)

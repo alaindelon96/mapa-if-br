@@ -1,8 +1,14 @@
 """Geocodificação dos pontos de atendimento pelo CNEFE do IBGE.
 
-Dá a cada linha de ``data/processed/if_sul_categorizado.parquet`` uma
+Dá a cada linha de ``data/processed/if_<recorte>_categorizado.parquet`` uma
 coordenada (`latitude`, `longitude`) e o rótulo honesto do quanto ela vale
-(`precisao`), gravando ``data/processed/pontos_geocodificados.parquet``.
+(`precisao`), gravando ``data/processed/pontos_geocodificados_<recorte>.parquet``.
+
+O CNEFE é publicado UM ARQUIVO POR UF, então o recorte territorial decide
+quantos ZIP são baixados e varridos — três (~580 MB) na Região Sul, 27
+(~3,9 GB) no país inteiro. Os arquivos já baixados são reaproveitados entre
+recortes: o nome deles é o da UF, não o do recorte, e o CNEFE é produto do
+Censo 2022 e não muda.
 
 Uso (a partir da raiz do projeto, com o venv ativo)::
 
@@ -29,8 +35,8 @@ junção por chave contra um cadastro que o IBGE publica inteiro:
 
 * o **CNEFE do Censo 2022** traz TODOS os endereços do país com CEP,
   logradouro, número e LAT/LON medidas em campo;
-* é distribuído em arquivo por UF — 580 MB para RS/SC/PR, baixados **uma vez**
-  e reaproveitados de ``data/raw/cnefe/``;
+* é distribuído em arquivo por UF — 580 MB para RS/SC/PR, 3,9 GB para as 27 —,
+  baixados **uma vez** e reaproveitados de ``data/raw/cnefe/``;
 * depois disso a geocodificação é uma junção local, sem limite de requisição,
   sem rede e sem variar de uma execução para outra;
 * é o mesmo produtor da malha municipal que o projeto já usa, então o código de
@@ -250,8 +256,8 @@ def chave_logradouro(texto: object) -> str:
 def _chaves_de_serie(serie: pd.Series) -> pd.Series:
     """Aplica `chave_logradouro` a uma Series, calculando só os valores únicos.
 
-    O CNEFE do Sul tem ~12 milhões de linhas e algumas centenas de milhares de
-    nomes de logradouro distintos. Rodar a normalização por linha custaria
+    O CNEFE do Sul tem ~12 milhões de linhas (e o nacional, ~90) com algumas
+    centenas de milhares de nomes de logradouro distintos. Rodar a normalização por linha custaria
     minutos em laço Python; rodá-la sobre os únicos e reindexar custa segundos.
 
     Args:
@@ -294,7 +300,7 @@ def baixar_uf(uf: str, usar_cache: bool = True) -> Path:
             a saída é apontar ``REQUESTS_CA_BUNDLE`` para o certificado raiz
             dessa ferramenta.
     """
-    codigo_uf = config.CODIGO_UF_SUL[uf]
+    codigo_uf = config.CODIGO_UF[uf]
     nome = f"{codigo_uf}_{uf}.zip"
     destino = config.DIR_CNEFE / nome
 
@@ -519,7 +525,7 @@ def _pertence(municipio: pd.Series, chave: pd.Series, buscadas: set[str]) -> np.
     pertinência possa ser feito por `Series.isin`, que resolve tudo em código
     compilado. A versão anterior montava uma tupla Python e consultava um `set`
     por linha, o que somava ~33 milhões de operações no interpretador ao longo
-    dos três estados e dominava o tempo da etapa.
+    dos três estados do Sul e dominava o tempo da etapa.
 
     Args:
         municipio: código IBGE do município de cada endereço.
@@ -633,7 +639,7 @@ def construir_indice(
     alvo: pd.DataFrame,
     usar_cache: bool = True,
 ) -> dict[str, pd.DataFrame]:
-    """Monta as quatro tabelas de consulta do CNEFE para as UFs do Sul.
+    """Monta as quatro tabelas de consulta do CNEFE para as UFs do recorte.
 
     Percorre uma UF por vez e consolida antes de passar à próxima: como as
     chaves são sempre prefixadas pelo código do município, e município não
@@ -662,7 +668,7 @@ def construir_indice(
     partes: dict[str, list[pd.DataFrame]] = {
         "cep_num": [], "cep": [], "logr_num": [], "logr": [],
     }
-    for uf in config.SIGLAS_SUL:
+    for uf in config.SIGLAS_UF:
         caminho = baixar_uf(uf, usar_cache=usar_cache)
         por_cep, por_logr, lidos = _varrer_uf(caminho, chaves_cep, chaves_logr)
         _LOGGER.info(
@@ -1037,18 +1043,20 @@ def desempatar_coincidentes(pontos: pd.DataFrame) -> pd.DataFrame:
 
 
 def executar(
-    caminho_pontos: Path = config.ARQUIVO_IF_SUL_CATEGORIZADO,
-    caminho_agregado: Path = config.ARQUIVO_AGREGADO_MUNICIPIO,
-    destino: Path = config.ARQUIVO_PONTOS_GEOCODIFICADOS,
+    caminho_pontos: Path | None = None,
+    caminho_agregado: Path | None = None,
+    destino: Path | None = None,
     usar_cache: bool = True,
 ) -> pd.DataFrame:
     """Geocodifica os pontos de atendimento e grava o Parquet.
 
     Args:
-        caminho_pontos: dataset categorizado de `src.etl_bacen`.
+        caminho_pontos: dataset categorizado de `src.etl_bacen`; ``None``
+            deriva do recorte ativo.
         caminho_agregado: GeoParquet de `src.agregacao`, usado para o fallback
-            de município e para a conferência espacial.
-        destino: caminho do Parquet de saída.
+            de município e para a conferência espacial; ``None`` deriva do
+            recorte ativo.
+        destino: caminho do Parquet de saída; ``None`` deriva do recorte ativo.
         usar_cache: reaproveita os ZIP do CNEFE já baixados.
 
     Returns:
@@ -1057,6 +1065,10 @@ def executar(
     Raises:
         FileNotFoundError: se algum dos dois Parquet de entrada não existir.
     """
+    caminho_pontos = caminho_pontos or config.arquivo_if_categorizado()
+    caminho_agregado = caminho_agregado or config.arquivo_agregado_municipio()
+    destino = destino or config.arquivo_pontos_geocodificados()
+
     if not caminho_pontos.exists():
         raise FileNotFoundError(
             f"Dataset não encontrado: {caminho_pontos}. "

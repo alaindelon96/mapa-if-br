@@ -1552,21 +1552,22 @@ _CSS_PAGINA = "<style>" + _VARIAVEIS_CSS + _CSS_CORPO + "</style>"
 # --------------------------------------------------------------------------- #
 
 
-def carregar_agregado(
-    caminho: Path = config.ARQUIVO_AGREGADO_MUNICIPIO,
-) -> gpd.GeoDataFrame:
+def carregar_agregado(caminho: Path | None = None) -> gpd.GeoDataFrame:
     """Lê o agregado por município, com a geometria.
 
     Args:
-        caminho: caminho do GeoParquet produzido por `src.agregacao`.
+        caminho: GeoParquet produzido por `src.agregacao`; ``None`` deriva do
+            recorte ativo.
 
     Returns:
-        GeoDataFrame com uma linha por município do Sul, em `config.CRS_GEOGRAFICO`.
+        GeoDataFrame com uma linha por município do recorte, em
+        `config.CRS_GEOGRAFICO`.
 
     Raises:
         FileNotFoundError: se o arquivo não existir — rode `python -m src.agregacao`.
         KeyError: se faltar alguma coluna exigida pelo mapa.
     """
+    caminho = caminho or config.arquivo_agregado_municipio()
     if not caminho.exists():
         raise FileNotFoundError(
             f"Agregado não encontrado: {caminho}. "
@@ -1841,6 +1842,11 @@ def adicionar_coropletico(
         "municipio_ibge",
         "municipio_nome",
         "uf",
+        # `regiao` viaja junto de `uf` porque o recorte no navegador passa por
+        # ela: com 27 UFs o filtro é hierárquico (região -> estado), e o
+        # controlador precisa saber a que região cada município pertence sem
+        # carregar uma segunda tabela UF -> região no HTML.
+        "regiao",
         "populacao_valor",
         "total_geral",
         "total_bancos",
@@ -1978,12 +1984,41 @@ def limites_por_uf(agregado: gpd.GeoDataFrame) -> dict[str, list[list[float]]]:
     return limites
 
 
-def ufs_do_recorte(agregado: gpd.GeoDataFrame) -> list[str]:
-    """UFs presentes no agregado, na ordem de `config.SIGLAS_SUL`.
+def enquadramento_inicial(
+    agregado: gpd.GeoDataFrame,
+) -> tuple[tuple[float, float], int]:
+    """Centro e zoom de abertura, medidos no recorte que foi carregado.
 
-    UF que apareça no dado e não esteja na constante NÃO é descartada: entra ao
-    fim, em ordem alfabética, para que o filtro do mapa continue cobrindo todo
-    o recorte mesmo que a configuração fique para trás.
+    Substitui as constantes `CENTRO_MAPA` e `ZOOM_INICIAL` que o projeto
+    carregava calculadas à mão para a *bounding box* do Sul. A conta é a mesma
+    que os comentários daquelas constantes descreviam — está em
+    `config.centro_da_caixa` e `config.zoom_da_caixa` —, só que aplicada à
+    geometria de fato, e não a números transcritos: com o recorte do Sul ela
+    devolve ``(-28.13, -52.84)`` e zoom 6, exatamente os valores antigos.
+
+    Args:
+        agregado: saída de `carregar_agregado`.
+
+    Returns:
+        ``((lat, lon), zoom)``.
+    """
+    caixa = limites_por_uf(agregado)["todos"]
+    return config.centro_da_caixa(caixa), config.zoom_da_caixa(caixa)
+
+
+def ufs_do_recorte(agregado: gpd.GeoDataFrame) -> list[str]:
+    """UFs presentes no agregado, na ordem em que o filtro de estado as mostra.
+
+    Quem manda sobre QUAIS UFs entram é o dado: o mapa é gerado a partir do
+    agregado já gravado, que pode ter sido produzido por um recorte diferente
+    do ativo — abrir ``python -m src.mapa`` sobre o agregado nacional é
+    exatamente esse caso.
+
+    Quem manda sobre a ORDEM é o recorte ativo (`config.SIGLAS_UF`), porque
+    ela é escolha de apresentação e está declarada lá. O que sobrar entra
+    depois, em ordem de código do IBGE, e uma UF fora até da tabela entra por
+    último, em ordem alfabética — nada é descartado, para que o filtro continue
+    cobrindo todo o agregado mesmo com a configuração para trás.
 
     Args:
         agregado: saída de `carregar_agregado`.
@@ -1992,15 +2027,18 @@ def ufs_do_recorte(agregado: gpd.GeoDataFrame) -> list[str]:
         Ex.: ``["RS", "SC", "PR"]``.
     """
     presentes = {str(uf) for uf in agregado["uf"].dropna().unique()}
-    conhecidas = [uf for uf in config.SIGLAS_SUL if uf in presentes]
-    novas = sorted(presentes - set(config.SIGLAS_SUL))
+
+    do_recorte = [uf for uf in config.SIGLAS_UF if uf in presentes]
+    restantes = presentes - set(do_recorte)
+    conhecidas = [uf for uf in config.SIGLAS_BR if uf in restantes]
+    novas = sorted(restantes - set(config.SIGLAS_BR))
     if novas:
         _LOGGER.warning(
-            "UF(s) fora de config.SIGLAS_SUL no agregado: %r. "
-            "Entraram ao fim do filtro de estado; atualize a constante.",
+            "UF(s) fora de config.CODIGO_UF no agregado: %r. "
+            "Entraram ao fim do filtro de estado; atualize a tabela.",
             novas,
         )
-    return conhecidas + novas
+    return do_recorte + conhecidas + novas
 
 
 # --------------------------------------------------------------------------- #
@@ -2176,9 +2214,7 @@ def adicionar_moldura(mapa: folium.Map, agregado: gpd.GeoDataFrame) -> None:
 # --------------------------------------------------------------------------- #
 
 
-def carregar_pontos_geocodificados(
-    caminho: Path = config.ARQUIVO_PONTOS_GEOCODIFICADOS,
-) -> pd.DataFrame:
+def carregar_pontos_geocodificados(caminho: Path | None = None) -> pd.DataFrame:
     """Lê os pontos de atendimento com coordenada e nível de precisão.
 
     Este módulo não geocodifica nada: ele consome o que `src.cnefe` resolveu.
@@ -2187,7 +2223,8 @@ def carregar_pontos_geocodificados(
     durante um ajuste de cor ou de popup.
 
     Args:
-        caminho: Parquet produzido por `src.cnefe`.
+        caminho: Parquet produzido por `src.cnefe`; ``None`` deriva do recorte
+            ativo.
 
     Returns:
         DataFrame com uma linha por ponto de atendimento, incluindo
@@ -2592,10 +2629,16 @@ def adicionar_camadas_de_pontos(
 # --------------------------------------------------------------------------- #
 
 
-def criar_mapa_base() -> folium.Map:
-    """Cria o mapa Folium centrado no Sul, no zoom inicial da configuração.
+def criar_mapa_base(
+    centro: tuple[float, float], zoom: int
+) -> folium.Map:
+    """Cria o mapa Folium no enquadramento medido para o recorte.
 
     A folha de estilo NÃO entra aqui — ver `aplicar_folha_de_estilo`.
+
+    Args:
+        centro: ``(latitude, longitude)`` de abertura, de `enquadramento_inicial`.
+        zoom: zoom de abertura, de `enquadramento_inicial`.
 
     Returns:
         O `folium.Map`, já com a camada base, os dois panes próprios e, no
@@ -2605,8 +2648,8 @@ def criar_mapa_base() -> folium.Map:
     # nó SVG por ponto. Sem cluster, todos existem no DOM ao mesmo tempo, e é
     # essa opção que mantém a navegação fluida — ver o cabeçalho do módulo.
     mapa = folium.Map(
-        location=config.CENTRO_MAPA,
-        zoom_start=config.ZOOM_INICIAL,
+        location=list(centro),
+        zoom_start=zoom,
         tiles=None,
         control_scale=True,
         prefer_canvas=True,
@@ -3932,16 +3975,17 @@ def adicionar_controle_de_camadas(mapa: folium.Map) -> folium.LayerControl:
 
 
 def gera_mapa(
-    caminho_agregado: Path = config.ARQUIVO_AGREGADO_MUNICIPIO,
-    caminho_pontos: Path = config.ARQUIVO_PONTOS_GEOCODIFICADOS,
-    destino: Path = config.ARQUIVO_MAPA,
+    caminho_agregado: Path | None = None,
+    caminho_pontos: Path | None = None,
+    destino: Path | None = None,
 ) -> Path:
     """Gera o mapa interativo completo e grava o HTML.
 
     Etapas, na ordem:
 
     1. lê o agregado por município (com geometria) e o dataset de pontos;
-    2. monta o mapa base centrado no Sul, no zoom de `config.ZOOM_INICIAL`;
+    2. mede o enquadramento de abertura na geometria do recorte carregado
+       (`enquadramento_inicial`) e monta o mapa base nele;
     3. adiciona o coroplético por `total_cooperativas`, com popup e tooltip por
        município (nome, população — ou "dado indisponível" —, total de bancos,
        total de pontos de cooperativas e o detalhamento por `sub_categoria`),
@@ -3955,9 +3999,12 @@ def gera_mapa(
        estilo (nesta ordem, que é obrigatória), e grava o HTML.
 
     Args:
-        caminho_agregado: GeoParquet de `src.agregacao`.
-        caminho_pontos: Parquet geocodificado de `src.cnefe`.
-        destino: caminho do HTML de saída; o diretório é criado se faltar.
+        caminho_agregado: GeoParquet de `src.agregacao`; ``None`` deriva do
+            recorte ativo.
+        caminho_pontos: Parquet geocodificado de `src.cnefe`; ``None`` deriva
+            do recorte ativo.
+        destino: caminho do HTML de saída; ``None`` deriva do recorte ativo. O
+            diretório é criado se faltar.
 
     Returns:
         O caminho do HTML gravado.
@@ -3965,10 +4012,15 @@ def gera_mapa(
     Raises:
         FileNotFoundError: se algum dos dois Parquet de entrada não existir.
     """
+    caminho_agregado = caminho_agregado or config.arquivo_agregado_municipio()
+    caminho_pontos = caminho_pontos or config.arquivo_pontos_geocodificados()
+    destino = destino or config.arquivo_mapa()
+
     agregado = carregar_agregado(caminho_agregado)
     localizados = carregar_pontos_geocodificados(caminho_pontos)
 
-    mapa = criar_mapa_base()
+    centro, zoom = enquadramento_inicial(agregado)
+    mapa = criar_mapa_base(centro, zoom)
 
     com_textos = preparar_textos_municipio(agregado)
     coropletico = adicionar_coropletico(mapa, com_textos)
@@ -3998,7 +4050,9 @@ def gera_mapa(
     embutido = embutir.embutir_no_html(destino)
     embutir.declarar_idioma(destino)
 
-    imprimir_resumo(agregado, localizados, estrutura, destino, embutido)
+    imprimir_resumo(
+        agregado, localizados, estrutura, destino, embutido, (centro, zoom)
+    )
     return destino
 
 
@@ -4008,6 +4062,7 @@ def imprimir_resumo(
     estrutura: list[dict],
     destino: Path,
     embutido: dict[str, int] | None = None,
+    enquadramento: tuple[tuple[float, float], int] | None = None,
 ) -> None:
     """Imprime o que foi renderizado, para conferência manual.
 
@@ -4016,12 +4071,17 @@ def imprimir_resumo(
         localizados: saída de `carregar_pontos_geocodificados`.
         estrutura: saída de `adicionar_camadas_de_pontos`.
         destino: caminho do HTML gravado.
+        embutido: contagem devolvida por `embutir.embutir_no_html`.
+        enquadramento: ``((lat, lon), zoom)`` de `enquadramento_inicial`;
+            ``None`` remede sobre o agregado.
     """
+    centro, zoom = enquadramento or enquadramento_inicial(agregado)
+
     print("=" * 78)
-    print("MAPA — output/mapa_if_sul.html")
+    print(f"MAPA — {destino.relative_to(config.BASE_DIR)}")
     print("=" * 78)
-    print(f"Centro {config.CENTRO_MAPA}, zoom {config.ZOOM_INICIAL}, "
-          f"base {config.TILES_PADRAO!r}")
+    print(f"UFs no agregado: {', '.join(ufs_do_recorte(agregado))}")
+    print(f"Centro {centro}, zoom {zoom}, base {config.TILES_PADRAO!r}")
     # Sem chave a CARTO não devolve erro: devolve o ladrilho com a marca
     # d'água "API KEY REQUIRED" impressa por cima. Como o mapa sai "pronto" de
     # qualquer jeito, o aviso precisa estar aqui, ou a ausência da chave só

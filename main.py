@@ -10,7 +10,9 @@ rodar, `main` sabe como reportar.
 
 Uso::
 
-    python main.py                    # execução normal, tudo em cache
+    python main.py                    # Região Sul (padrão), tudo em cache
+    python main.py --ufs BR           # o país inteiro, 27 UFs
+    python main.py --ufs SP,RJ,MG     # um recorte qualquer
     python main.py --sem-cache-malha  # rebaixa a malha da API do IBGE
     python main.py -v                 # inclui o log de nível DEBUG
 
@@ -161,7 +163,7 @@ def _diagnosticar(erro: Exception) -> str:
         return (
             "Um ZIP do CNEFE em data/raw/cnefe/ está corrompido — em geral,\n"
             "  download interrompido. Rode `python main.py --sem-cache-cnefe`\n"
-            "  para baixá-lo de novo (~580 MB)."
+            "  para baixá-lo de novo (um arquivo por UF do recorte)."
         )
 
     if isinstance(causa, ValueError):
@@ -217,23 +219,61 @@ def _relatar_falha(erro: Exception) -> None:
 # --------------------------------------------------------------------------- #
 
 
+def _recorte_do_argumento(texto: str) -> list[str]:
+    """Adapta `config.interpretar_recorte` ao contrato de tipo do argparse.
+
+    A leitura do texto é do `config`, que é quem conhece as regiões e as
+    siglas. O que se acrescenta aqui é só a conversão da exceção: com
+    `argparse.ArgumentTypeError` o argparse imprime o uso e sai com código 2,
+    enquanto um `ValueError` cru viraria traceback na tela.
+
+    Args:
+        texto: o valor cru vindo da linha de comando.
+
+    Returns:
+        A lista de siglas, ainda não normalizada.
+
+    Raises:
+        argparse.ArgumentTypeError: se o texto não render nenhuma sigla.
+    """
+    try:
+        return config.interpretar_recorte(texto)
+    except ValueError as erro:
+        raise argparse.ArgumentTypeError(str(erro)) from erro
+
+
 def montar_parser() -> argparse.ArgumentParser:
     """Monta o parser da linha de comando.
 
     Returns:
-        O parser, com as duas chaves de cache e o `--verbose`.
+        O parser, com o recorte territorial, as duas chaves de cache e o
+        `--verbose`.
     """
     parser = argparse.ArgumentParser(
         prog="main.py",
         description=(
             "Gera o mapa de cobertura de cooperativas de crédito e dos cinco "
-            "maiores bancos no Sul do Brasil (RS, SC, PR)."
+            "maiores bancos. O recorte territorial padrão é a Região Sul "
+            "(RS, SC, PR); use --ufs para ampliá-lo."
         ),
         epilog=(
             "Sem argumentos, tudo que já foi baixado é reaproveitado de data/raw/ "
-            "e só o processamento roda de novo."
+            "e só o processamento roda de novo. Cada recorte grava os artefatos "
+            "com nome próprio, então trocar de recorte não sobrescreve o cache "
+            "do anterior."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument(
+        "--ufs",
+        type=_recorte_do_argumento,
+        default=list(config.RECORTE_PADRAO),
+        metavar="RECORTE",
+        help=(
+            "recorte territorial: BR para as 27 UFs, o nome de uma região "
+            "(Norte, Nordeste, Centro-Oeste, Sudeste, Sul) ou siglas separadas "
+            "por vírgula (ex.: RS,SC,PR). Padrão: a Região Sul."
+        ),
     )
     parser.add_argument(
         "--sem-cache-malha",
@@ -247,8 +287,9 @@ def montar_parser() -> argparse.ArgumentParser:
         "--sem-cache-cnefe",
         action="store_true",
         help=(
-            "rebaixa os ~580 MB do CNEFE em vez de reaproveitar os ZIP de "
-            "data/raw/cnefe/. Necessário só para se recuperar de cache corrompido."
+            "rebaixa os ZIP do CNEFE (um por UF do recorte) em vez de "
+            "reaproveitar os de data/raw/cnefe/. Necessário só para se "
+            "recuperar de cache corrompido."
         ),
     )
     parser.add_argument(
@@ -295,14 +336,18 @@ def _anunciar_inicio(args: argparse.Namespace) -> None:
     """
     malha = "rebaixar da API" if args.sem_cache_malha else "usar cache de data/raw/"
     cnefe = (
-        "rebaixar (~580 MB)"
+        f"rebaixar ({len(config.SIGLAS_UF)} UF(s))"
         if args.sem_cache_cnefe
         else "usar cache de data/raw/cnefe/"
     )
     print("=" * 78)
     print("mapa-if-sul — cobertura de cooperativas de crédito e dos 5 maiores bancos")
-    print(f"Região Sul (RS, SC, PR) — dados do BACEN de {config.DATA_DADOS}")
+    print(
+        f"{config.nome_do_recorte()} — dados do BACEN de {config.DATA_DADOS}"
+    )
     print("=" * 78)
+    print(f"  Recorte       : {len(config.SIGLAS_UF)} UF(s) "
+          f"[{', '.join(config.SIGLAS_UF)}]")
     print(f"  Malha do IBGE : {malha}")
     print(f"  CNEFE         : {cnefe}")
     print(f"  Log           : {'DEBUG' if args.verbose else 'INFO'}")
@@ -318,9 +363,9 @@ def _anunciar_fim(destino: Path) -> None:
     print("PIPELINE CONCLUÍDO")
     print("=" * 78)
     for rotulo, caminho in (
-        ("Dataset categorizado", config.ARQUIVO_IF_SUL_CATEGORIZADO),
-        ("Agregado por município", config.ARQUIVO_AGREGADO_MUNICIPIO),
-        ("Pontos geocodificados", config.ARQUIVO_PONTOS_GEOCODIFICADOS),
+        ("Dataset categorizado", config.arquivo_if_categorizado()),
+        ("Agregado por município", config.arquivo_agregado_municipio()),
+        ("Pontos geocodificados", config.arquivo_pontos_geocodificados()),
         ("Mapa interativo", destino),
     ):
         print(f"  {rotulo:<24} {caminho}")
@@ -336,7 +381,17 @@ def main(argv: list[str] | None = None) -> int:
     Returns:
         `SAIDA_OK`, `SAIDA_ERRO` ou `SAIDA_INTERROMPIDO`.
     """
-    args = montar_parser().parse_args(argv)
+    parser = montar_parser()
+    args = parser.parse_args(argv)
+
+    # O recorte é fixado ANTES de qualquer etapa, e antes até do anúncio de
+    # início: é dele que saem os nomes dos artefatos e as UFs que cada módulo
+    # enxerga. Ver `config.SIGLAS_UF`.
+    try:
+        config.definir_recorte(args.ufs)
+    except ValueError as erro:
+        parser.error(str(erro))
+
     configurar_logs(args.verbose)
     _anunciar_inicio(args)
 

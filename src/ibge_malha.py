@@ -1,11 +1,15 @@
-"""Malha territorial dos municípios do Sul, via APIs do IBGE.
+"""Malha territorial dos municípios do recorte, via APIs do IBGE.
 
-Baixa a malha de RS, SC e PR pela API de Malhas
+Baixa a malha das UFs de `config.SIGLAS_UF` pela API de Malhas
 (https://servicodados.ibge.gov.br/api/docs/malhas), grava o GeoJSON em
-``data/raw/malha_municipios_sul.geojson`` e devolve um GeoDataFrame em
+``data/raw/malha_municipios_<recorte>.geojson`` e devolve um GeoDataFrame em
 EPSG:4326 com o código do município já padronizado como string de 7 dígitos —
 o mesmo formato de `municipio_ibge` produzido pelo ETL do BACEN, para que o
 join entre as duas bases seja direto.
+
+A API responde POR UF, então o recorte não é um filtro aplicado depois: ele
+decide quantas chamadas são feitas. Um recorte nacional são 27 respostas
+concatenadas num só ``FeatureCollection``.
 
 Opcionalmente enriquece a malha com o nome oficial do município (API de
 Localidades) e a população estimada mais recente (agregado SIDRA 6579).
@@ -14,7 +18,7 @@ Uso (a partir da raiz do projeto, com o venv ativo)::
 
     python -m src.ibge_malha
 
-Saída: ``data/raw/malha_municipios_sul.geojson``.
+Saída: ``data/raw/malha_municipios_<recorte>.geojson``.
 """
 
 from __future__ import annotations
@@ -55,18 +59,24 @@ CANDIDATOS_CODIGO_MUNICIPIO = [
     "CD_MUNICIPIO",
 ]
 
-#: Colunas do GeoDataFrame devolvido por `obter_malha_sul`, nesta ordem.
+#: Colunas do GeoDataFrame devolvido por `obter_malha`, nesta ordem.
 COLUNAS_MALHA = [
     "municipio_ibge",
     "municipio_nome",
     "uf",
+    "regiao",
     "populacao",
     "populacao_ano",
     "geometry",
 ]
 
 #: Código IBGE da UF (dois primeiros dígitos do código de município) -> sigla.
-_UF_POR_CODIGO = {str(codigo): sigla for sigla, codigo in config.CODIGO_UF_SUL.items()}
+#:
+#: A tabela é a das 27 UFs, e não a do recorte: ela serve para LER o código de
+#: qualquer feição que chegue, inclusive uma que não devesse estar ali. Restringi-la
+#: ao recorte faria um município fora dele virar `uf` nula em silêncio, em vez de
+#: aparecer no aviso de `padronizar_codigo_malha`.
+_UF_POR_CODIGO = {str(codigo): sigla for sigla, codigo in config.CODIGO_UF.items()}
 
 
 # --------------------------------------------------------------------------- #
@@ -188,12 +198,12 @@ def baixar_malha_uf(
     if not feicoes:
         raise ValueError(f"A API de Malhas devolveu 0 municípios para {uf}.")
 
-    esperado = config.MUNICIPIOS_POR_UF_SUL.get(uf)
+    esperado = config.MUNICIPIOS_POR_UF.get(uf)
     if esperado is not None and len(feicoes) != esperado:
         # Não interrompe: a divisão territorial muda (raro, mas acontece). O
         # aviso existe para que a divergência apareça antes de virar buraco no mapa.
         _LOGGER.warning(
-            "%s: a malha veio com %d municípios, mas MUNICIPIOS_POR_UF_SUL "
+            "%s: a malha veio com %d municípios, mas MUNICIPIOS_POR_UF "
             "esperava %d. Confira se a divisão territorial mudou.",
             uf,
             len(feicoes),
@@ -205,23 +215,26 @@ def baixar_malha_uf(
     return colecao
 
 
-def baixar_malha_sul(
-    destino: Path = config.ARQUIVO_MALHA_SUL,
+def baixar_malha(
+    destino: Path | None = None,
     ufs: list[str] | None = None,
     qualidade: str = config.QUALIDADE_MALHA,
     usar_cache: bool = True,
 ) -> Path:
-    """Baixa a malha de RS/SC/PR e grava um único GeoJSON em ``data/raw/``.
+    """Baixa a malha do recorte e grava um único GeoJSON em ``data/raw/``.
 
-    As três respostas da API são concatenadas em um só ``FeatureCollection``.
-    As feições são gravadas exatamente como o IBGE as devolve (única
-    propriedade: ``codarea``) — qualquer atributo derivado é acrescentado
-    depois, no carregamento, para que o arquivo em ``data/raw/`` continue
-    sendo cópia fiel da fonte.
+    Uma resposta da API por UF, todas concatenadas em um só
+    ``FeatureCollection``. As feições são gravadas exatamente como o IBGE as
+    devolve (única propriedade: ``codarea``) — qualquer atributo derivado é
+    acrescentado depois, no carregamento, para que o arquivo em ``data/raw/``
+    continue sendo cópia fiel da fonte.
+
+    O nome do arquivo carrega o slug do recorte, então a malha nacional e a do
+    Sul convivem em cache sem uma sobrescrever a outra.
 
     Args:
-        destino: caminho do ``.geojson`` de saída.
-        ufs: siglas a baixar; por padrão `config.SIGLAS_SUL`.
+        destino: caminho do ``.geojson`` de saída; ``None`` deriva do recorte.
+        ufs: siglas a baixar; ``None`` usa o recorte ativo (`config.SIGLAS_UF`).
         qualidade: nível de generalização das geometrias.
         usar_cache: se ``True`` e o arquivo já existir, não rebaixa nada. Passe
             ``False`` para forçar a atualização da malha.
@@ -229,7 +242,8 @@ def baixar_malha_sul(
     Returns:
         O caminho do arquivo gravado (ou do cache reaproveitado).
     """
-    ufs = list(config.SIGLAS_SUL) if ufs is None else list(ufs)
+    ufs = config.recorte(ufs)
+    destino = destino or config.arquivo_malha(ufs)
 
     if usar_cache and destino.exists():
         _LOGGER.info("Malha já existe em %s; download ignorado.", destino)
@@ -250,7 +264,8 @@ def baixar_malha_sul(
         )
 
     _LOGGER.info(
-        "Malha do Sul gravada em %s (%d municípios, %.1f MB, qualidade=%s).",
+        "Malha de %s gravada em %s (%d municípios, %.1f MB, qualidade=%s).",
+        config.nome_do_recorte(ufs),
         destino,
         len(feicoes),
         destino.stat().st_size / 1e6,
@@ -264,7 +279,7 @@ def baixar_malha_sul(
 # --------------------------------------------------------------------------- #
 
 
-def carregar_malha(caminho: Path = config.ARQUIVO_MALHA_SUL) -> gpd.GeoDataFrame:
+def carregar_malha(caminho: Path | None = None) -> gpd.GeoDataFrame:
     """Lê o GeoJSON da malha como GeoDataFrame em `config.CRS_GEOGRAFICO`.
 
     A API de Malhas devolve o GeoJSON sem membro ``crs``, o que pela RFC 7946
@@ -274,14 +289,15 @@ def carregar_malha(caminho: Path = config.ARQUIVO_MALHA_SUL) -> gpd.GeoDataFrame
     GeoDataFrame é reprojetado em vez de ter o CRS sobrescrito.
 
     Args:
-        caminho: caminho do ``.geojson``.
+        caminho: caminho do ``.geojson``; ``None`` deriva do recorte ativo.
 
     Returns:
         GeoDataFrame em EPSG:4326.
 
     Raises:
-        FileNotFoundError: se o arquivo não existir — rode `baixar_malha_sul`.
+        FileNotFoundError: se o arquivo não existir — rode `baixar_malha`.
     """
+    caminho = caminho or config.arquivo_malha()
     if not caminho.exists():
         raise FileNotFoundError(
             f"Malha não encontrada: {caminho}. "
@@ -364,12 +380,20 @@ def padronizar_codigo_malha(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
     resultado["uf"] = (
         resultado["municipio_ibge"].str.slice(0, 2).map(_UF_POR_CODIGO).astype("string")
     )
-    fora_do_sul = int(resultado["uf"].isna().sum())
-    if fora_do_sul:
+    sem_uf = int(resultado["uf"].isna().sum())
+    if sem_uf:
         _LOGGER.warning(
-            "%d município(s) da malha não pertencem a RS/SC/PR — `uf` ficou nula.",
-            fora_do_sul,
+            "%d município(s) da malha têm código de UF desconhecido — `uf` "
+            "ficou nula.",
+            sem_uf,
         )
+
+    # A região é derivada da UF, e aqui, porque este é o único lugar do projeto
+    # em que a UF nasce. Deriva-la de novo mais adiante (na agregação, no mapa)
+    # criaria duas tabelas UF -> região para manter em acordo.
+    resultado["regiao"] = (
+        resultado["uf"].map(config.REGIAO_POR_UF).astype("string")
+    )
 
     return resultado
 
@@ -388,7 +412,7 @@ def buscar_nomes_municipios(
     Endpoint: ``/api/v1/localidades/estados/{UF}/municipios``.
 
     Args:
-        ufs: siglas a consultar; por padrão `config.SIGLAS_SUL`.
+        ufs: siglas a consultar; ``None`` usa o recorte ativo.
         sessao: sessão HTTP a reutilizar; se omitida, uma é criada e fechada
             internamente.
 
@@ -397,7 +421,7 @@ def buscar_nomes_municipios(
         Vazio, com as colunas corretas, se a API falhar — a falha é registrada
         no log e o pipeline segue com o campo nulo.
     """
-    ufs = list(config.SIGLAS_SUL) if ufs is None else list(ufs)
+    ufs = config.recorte(ufs)
     propria = sessao is None
     sessao = sessao or criar_sessao_http()
 
@@ -471,7 +495,7 @@ def buscar_populacao_municipios(
     não devolver fica nulo.
 
     Args:
-        ufs: siglas a consultar; por padrão `config.SIGLAS_SUL`.
+        ufs: siglas a consultar; ``None`` usa o recorte ativo.
         sessao: sessão HTTP a reutilizar; se omitida, uma é criada e fechada
             internamente.
 
@@ -480,7 +504,7 @@ def buscar_populacao_municipios(
         indisponível) e `populacao_ano` (``string``). Vazio, com as colunas
         corretas, se a API falhar.
     """
-    ufs = list(config.SIGLAS_SUL) if ufs is None else list(ufs)
+    ufs = config.recorte(ufs)
     propria = sessao is None
     sessao = sessao or criar_sessao_http()
 
@@ -492,7 +516,7 @@ def buscar_populacao_municipios(
     registros: list[dict[str, object]] = []
     try:
         for uf in ufs:
-            codigo_uf = config.CODIGO_UF_SUL[uf]
+            codigo_uf = config.CODIGO_UF[uf]
             try:
                 variaveis = _obter_json(
                     sessao, url, params={"localidades": f"N6[N3[{codigo_uf}]]"}
@@ -611,18 +635,19 @@ def enriquecer_malha(
 # --------------------------------------------------------------------------- #
 
 
-def obter_malha_sul(
-    caminho: Path = config.ARQUIVO_MALHA_SUL,
+def obter_malha(
+    caminho: Path | None = None,
     qualidade: str = config.QUALIDADE_MALHA,
     usar_cache: bool = True,
     com_atributos: bool = True,
+    ufs: list[str] | None = None,
 ) -> gpd.GeoDataFrame:
-    """Devolve a malha municipal de RS/SC/PR pronta para o join com o BACEN.
+    """Devolve a malha municipal do recorte, pronta para o join com o BACEN.
 
     Encadeia as quatro etapas do módulo:
 
-    1. baixa a malha dos três estados pela API de Malhas do IBGE e grava
-       ``data/raw/malha_municipios_sul.geojson`` (`baixar_malha_sul`);
+    1. baixa a malha de cada UF do recorte pela API de Malhas do IBGE e grava
+       ``data/raw/malha_municipios_<recorte>.geojson`` (`baixar_malha`);
     2. carrega o GeoJSON como GeoDataFrame em EPSG:4326 (`carregar_malha`);
     3. padroniza o código do município como string de 7 dígitos, com a mesma
        função usada no ETL do BACEN (`padronizar_codigo_malha`);
@@ -634,7 +659,8 @@ def obter_malha_sul(
     população é registrado como aviso no log — nenhum número é inventado.
 
     Args:
-        caminho: destino/origem do GeoJSON em ``data/raw/``.
+        caminho: destino/origem do GeoJSON em ``data/raw/``; ``None`` deriva do
+            recorte.
         qualidade: nível de generalização das geometrias (``"minima"``,
             ``"intermediaria"``, ``"maxima"``).
         usar_cache: reaproveita o GeoJSON já baixado; ``False`` força novo
@@ -642,12 +668,18 @@ def obter_malha_sul(
         com_atributos: se ``False``, pula as chamadas às APIs de Localidades e
             Agregados e devolve `municipio_nome`, `populacao` e
             `populacao_ano` nulas — útil para rodar sem rede.
+        ufs: recorte explícito; ``None`` usa o ativo (`config.SIGLAS_UF`).
 
     Returns:
         GeoDataFrame em EPSG:4326 com as colunas de `COLUNAS_MALHA`, ordenado
         por `municipio_ibge`.
     """
-    baixar_malha_sul(destino=caminho, qualidade=qualidade, usar_cache=usar_cache)
+    ufs = config.recorte(ufs)
+    caminho = caminho or config.arquivo_malha(ufs)
+
+    baixar_malha(
+        destino=caminho, ufs=ufs, qualidade=qualidade, usar_cache=usar_cache
+    )
 
     gdf = carregar_malha(caminho)
     gdf = padronizar_codigo_malha(gdf)
@@ -655,8 +687,8 @@ def obter_malha_sul(
     nomes = populacao = None
     if com_atributos:
         with criar_sessao_http() as sessao:
-            nomes = buscar_nomes_municipios(sessao=sessao)
-            populacao = buscar_populacao_municipios(sessao=sessao)
+            nomes = buscar_nomes_municipios(ufs=ufs, sessao=sessao)
+            populacao = buscar_populacao_municipios(ufs=ufs, sessao=sessao)
 
     malha = enriquecer_malha(gdf, nomes=nomes, populacao=populacao)
     return malha.sort_values("municipio_ibge").reset_index(drop=True)
@@ -666,13 +698,17 @@ def imprimir_resumo(malha: gpd.GeoDataFrame) -> None:
     """Imprime o resumo da malha para conferência manual.
 
     Args:
-        malha: saída de `obter_malha_sul`.
+        malha: saída de `obter_malha`.
     """
     print("=" * 78)
-    print("RESUMO — data/raw/malha_municipios_sul.geojson")
+    print(f"RESUMO — {config.arquivo_malha().relative_to(config.BASE_DIR)}")
     print("=" * 78)
+    print(f"Recorte: {config.nome_do_recorte()}")
     print(f"Municípios: {len(malha)}")
     print(f"CRS: {malha.crs.to_string()}\n")
+
+    print("-- municípios por região --")
+    print(malha["regiao"].value_counts().to_string(), "\n")
 
     print("-- municípios por UF --")
     print(malha["uf"].value_counts().to_string(), "\n")
@@ -683,7 +719,8 @@ def imprimir_resumo(malha: gpd.GeoDataFrame) -> None:
     print(f"Referência IBGE: {', '.join(anos) if anos else 'indisponível'}")
     print(f"Sem população informada: {sem_populacao} município(s)")
     if not sem_populacao:
-        print(f"População total do Sul: {int(malha['populacao'].sum()):,}".replace(",", "."))
+        total = f"{int(malha['populacao'].sum()):,}".replace(",", ".")
+        print(f"População total do recorte: {total}")
     print()
 
 
@@ -696,7 +733,7 @@ def executar(usar_cache: bool = True) -> gpd.GeoDataFrame:
     Returns:
         A malha enriquecida.
     """
-    malha = obter_malha_sul(usar_cache=usar_cache)
+    malha = obter_malha(usar_cache=usar_cache)
     imprimir_resumo(malha)
     return malha
 

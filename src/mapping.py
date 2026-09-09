@@ -7,8 +7,8 @@ from src import config
 
 
 def criar_mapa(
-    centro: tuple[float, float] = config.CENTRO_MAPA,
-    zoom: int = config.ZOOM_INICIAL,
+    centro: tuple[float, float] | None = None,
+    zoom: int | None = None,
     tiles: str = config.URL_TILES_PADRAO,
     atribuicao: str = config.ATRIBUICAO_TILES,
 ) -> folium.Map:
@@ -18,7 +18,14 @@ def criar_mapa(
     que mora a chave de API da CARTO (ver `config.URL_TILES_PADRAO`). Como o
     folium só embute atribuição nos aliases que conhece, ela vem junto em
     `atribuicao` — sem isso o construtor recusa a URL.
+
+    Sem `centro` e `zoom` o mapa abre no Brasil inteiro (`config.CAIXA_BRASIL`).
+    Este módulo é andaime genérico e não tem malha para medir; o mapa de
+    verdade deriva o enquadramento do recorte carregado, em
+    `mapa.enquadramento_inicial`.
     """
+    centro = centro or config.centro_da_caixa(config.CAIXA_BRASIL)
+    zoom = zoom if zoom is not None else config.zoom_da_caixa(config.CAIXA_BRASIL)
     return folium.Map(
         location=list(centro),
         zoom_start=zoom,

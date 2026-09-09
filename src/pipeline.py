@@ -2,28 +2,33 @@
 
 Ordem das etapas, com o artefato que cada uma grava:
 
-1. `etl_bacen`  — lê as duas planilhas do BACEN, recorta RS/SC/PR e as
-   instituições-alvo, classifica `categoria_if` e `sub_categoria`
-   -> ``data/processed/if_sul_categorizado.parquet``
-2. `ibge_malha` — malha municipal do Sul pela API do IBGE, com nome oficial e
-   população estimada
-   -> ``data/raw/malha_municipios_sul.geojson`` (reaproveitada do cache)
+1. `etl_bacen`  — lê as duas planilhas do BACEN, recorta o território
+   (`config.SIGLAS_UF`) e as instituições-alvo, classifica `categoria_if` e
+   `sub_categoria`
+   -> ``data/processed/if_<recorte>_categorizado.parquet``
+2. `ibge_malha` — malha municipal do recorte pela API do IBGE, com nome oficial
+   e população estimada
+   -> ``data/raw/malha_municipios_<recorte>.geojson`` (reaproveitada do cache)
 3. `agregacao`  — junta os dois pelo código IBGE, uma linha por município
-   -> ``data/processed/agregado_municipio.parquet``
+   -> ``data/processed/agregado_municipio_<recorte>.parquet``
 4. `cnefe`      — resolve a coordenada de cada ponto de atendimento contra o
    Cadastro Nacional de Endereços do Censo 2022
-   -> ``data/processed/pontos_geocodificados.parquet``
+   -> ``data/processed/pontos_geocodificados_<recorte>.parquet``
 5. `mapa`       — coroplético por município + camadas de ponto em dois níveis
-   -> ``output/mapa_if_sul.html``
+   -> ``output/mapa_if_<recorte>.html``
+
+Todo artefato carrega o slug do recorte no nome (ver `config.slug_recorte`),
+para que uma execução nacional e uma da Região Sul não se sobrescrevam.
 
 Cada etapa também roda sozinha (``python -m src.etl_bacen``, ``-m src.agregacao``,
 ``-m src.cnefe``, ``-m src.mapa``), o que é o caminho normal durante o
 desenvolvimento. Este módulo existe para a execução de ponta a ponta, via
 ``python main.py`` ou ``python -m src.pipeline``.
 
-A etapa 4 depende de ~580 MB de arquivos do CNEFE em ``data/raw/cnefe/``. Eles
-são baixados na primeira execução e reaproveitados em todas as seguintes — o
-CNEFE é um produto do Censo 2022 e não muda.
+A etapa 4 depende dos arquivos do CNEFE em ``data/raw/cnefe/`` — um por UF do
+recorte, ~580 MB nas três do Sul e ~3,9 GB nas 27. Eles são baixados na primeira
+execução e reaproveitados em todas as seguintes, inclusive entre recortes
+diferentes: o CNEFE é um produto do Censo 2022 e não muda.
 
 Por que a malha é uma etapa explícita aqui, se `agregacao.executar` já sabe
 buscá-la sozinha: assim ela é baixada/carregada UMA vez e passada adiante, o
@@ -161,16 +166,17 @@ def executar(usar_cache_malha: bool = True, usar_cache_cnefe: bool = True) -> Pa
         usar_cache_malha: quando ``True`` (padrão), reaproveita o GeoJSON já
             baixado em ``data/raw/``. Passe ``False`` para forçar uma consulta
             nova à API de Malhas do IBGE — necessário só quando a divisão
-            territorial muda, e caro: são os três estados em qualidade
-            intermediária, com o servidor do IBGE lento em horário comercial.
+            territorial muda, e caro: é uma chamada por UF do recorte, em
+            qualidade intermediária, com o servidor do IBGE lento em horário
+            comercial.
         usar_cache_cnefe: quando ``True`` (padrão), reaproveita os ZIP do CNEFE
-            de ``data/raw/cnefe/``. Passe ``False`` para baixar os 580 MB de
-            novo — necessário se o IBGE publicar uma revisão do cadastro, ou
-            para se recuperar de um arquivo corrompido em cache sem ter de
-            apagá-lo à mão.
+            de ``data/raw/cnefe/``. Passe ``False`` para baixá-los de novo —
+            necessário se o IBGE publicar uma revisão do cadastro, ou para se
+            recuperar de um arquivo corrompido em cache sem ter de apagá-lo à
+            mão.
 
     Returns:
-        O caminho do HTML gravado (``output/mapa_if_sul.html``).
+        O caminho do HTML gravado (``output/mapa_if_<recorte>.html``).
 
     Raises:
         EtapaFalhou: se qualquer etapa falhar. A causa original — planilha do
@@ -182,7 +188,7 @@ def executar(usar_cache_malha: bool = True, usar_cache_cnefe: bool = True) -> Pa
 
     _rodar_etapa(
         1,
-        "ETL BACEN — agências e postos de RS/SC/PR",
+        f"ETL BACEN — agências e postos de {config.nome_do_recorte()}",
         "1. ETL BACEN",
         etl_bacen.executar,
         duracoes,
@@ -240,14 +246,16 @@ def _obter_malha(usar_cache: bool) -> gpd.GeoDataFrame:
     bons com uma versão empobrecida: `enriquecer_malha` apenas registra um
     aviso quando a API não responde e devolve `municipio_nome` e `populacao`
     nulos, o pipeline seguiria em frente, e o resultado seria um mapa com
-    "<NA>/PR" no título de cada popup e "dado indisponível" nos 1.191
+    "<NA>/PR" no título de cada popup e "dado indisponível" em todos os
     municípios — sem nenhuma etapa falhando. Daí a barreira ser antes da
     gravação, e não uma inspeção do resultado.
 
     Três conferências, da mais estrutural para a mais tolerante:
 
-    1. cobertura por UF, contra `config.MUNICIPIOS_POR_UF_SUL` — malha faltando
-       município vira buraco no coroplético;
+    1. cobertura por UF, contra `config.municipios_esperados()` — malha
+       faltando município vira buraco no coroplético. A conferência é contra o
+       RECORTE, e não contra a tabela nacional inteira: comparar com as 27 UFs
+       reprovaria qualquer recorte menor que o Brasil;
     2. `municipio_nome`, que é exigido: sem ele o popup não identifica o
        município. A API de Localidades responde por UF, então um nome faltando
        significa uma UF inteira perdida, nunca uma lacuna do cadastro;
@@ -266,10 +274,17 @@ def _obter_malha(usar_cache: bool) -> gpd.GeoDataFrame:
     """
     malha = ibge_malha.executar(usar_cache=usar_cache)
 
+    esperado = config.municipios_esperados()
     por_uf = malha["uf"].value_counts().to_dict()
-    if por_uf != config.MUNICIPIOS_POR_UF_SUL:
+    if por_uf != esperado:
+        faltando = {
+            uf: quantos - por_uf.get(uf, 0)
+            for uf, quantos in esperado.items()
+            if por_uf.get(uf, 0) != quantos
+        }
         raise ValueError(
-            f"Malha incompleta: {por_uf} != {config.MUNICIPIOS_POR_UF_SUL}. "
+            f"Malha incompleta no recorte {config.nome_do_recorte()}: "
+            f"faltam/sobram {faltando} (esperado {esperado}, veio {por_uf}). "
             "Rode de novo com `usar_cache_malha=False` para baixar a malha "
             "outra vez da API do IBGE."
         )

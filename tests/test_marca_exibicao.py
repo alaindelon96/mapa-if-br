@@ -49,22 +49,22 @@ def _classificar(*linhas: dict) -> pd.DataFrame:
 
 @pytest.fixture(scope="module")
 def pontos() -> pd.DataFrame:
-    if not config.ARQUIVO_IF_SUL_CATEGORIZADO.exists():
+    if not config.arquivo_if_categorizado().exists():
         pytest.fail(
-            f"{config.ARQUIVO_IF_SUL_CATEGORIZADO} não existe. "
+            f"{config.arquivo_if_categorizado()} não existe. "
             "Rode `python -m src.etl_bacen` antes."
         )
-    return pd.read_parquet(config.ARQUIVO_IF_SUL_CATEGORIZADO)
+    return pd.read_parquet(config.arquivo_if_categorizado())
 
 
 @pytest.fixture(scope="module")
 def agregado() -> pd.DataFrame:
-    if not config.ARQUIVO_AGREGADO_MUNICIPIO.exists():
+    if not config.arquivo_agregado_municipio().exists():
         pytest.fail(
-            f"{config.ARQUIVO_AGREGADO_MUNICIPIO} não existe. "
+            f"{config.arquivo_agregado_municipio()} não existe. "
             "Rode `python -m src.agregacao` antes."
         )
-    return pd.read_parquet(config.ARQUIVO_AGREGADO_MUNICIPIO)
+    return pd.read_parquet(config.arquivo_agregado_municipio())
 
 
 # --------------------------------------------------------------------------- #

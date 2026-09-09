@@ -4,6 +4,7 @@ Centraliza caminhos de diretórios e as regras de recorte do dataset
 (estados-alvo, instituições-alvo e segmento de cooperativas).
 """
 
+import math
 import os
 from pathlib import Path
 
@@ -42,25 +43,356 @@ DATA_DADOS = "08/2026"
 # zero-based — que é exatamente o valor esperado por `pandas.read_excel(header=)`.
 LINHA_CABECALHO_BACEN = 9
 
-# Destino do dataset categorizado.
-ARQUIVO_IF_SUL_CATEGORIZADO = PROCESSED_DIR / "if_sul_categorizado.parquet"
+# O destino do dataset categorizado é derivado do recorte — ver
+# `arquivo_if_categorizado`, na seção "Artefatos derivados do recorte".
 
 # --------------------------------------------------------------------------- #
 # Recorte territorial
 # --------------------------------------------------------------------------- #
 
-#: Siglas das UFs da Região Sul mantidas no dataset.
-SIGLAS_SUL = ["RS", "SC", "PR"]
+#
+# As tabelas abaixo descrevem o PAÍS INTEIRO e são fixas; o que varia de uma
+# execução para outra é `SIGLAS_UF`, o recorte ATIVO, que diz quais dessas UFs
+# entram no dataset, na malha, no CNEFE e no mapa. O padrão é a Região Sul, o
+# recorte com que o projeto nasceu; `definir_recorte` o troca a partir da linha
+# de comando (``--ufs``).
 
-#: Código IBGE de cada UF do Sul. São os dois primeiros dígitos do código de
-#: município (ex.: 4314902 = Porto Alegre, UF 43 = RS), o que permite derivar a
-#: UF de qualquer feição da malha sem consultar a API de Localidades.
-CODIGO_UF_SUL = {"PR": 41, "SC": 42, "RS": 43}
+#: Código IBGE de cada UF. São os dois primeiros dígitos do código de município
+#: (ex.: 4314902 = Porto Alegre, UF 43 = RS), o que permite derivar a UF de
+#: qualquer feição da malha sem consultar a API de Localidades.
+CODIGO_UF = {
+    # Norte
+    "RO": 11, "AC": 12, "AM": 13, "RR": 14, "PA": 15, "AP": 16, "TO": 17,
+    # Nordeste
+    "MA": 21, "PI": 22, "CE": 23, "RN": 24, "PB": 25,
+    "PE": 26, "AL": 27, "SE": 28, "BA": 29,
+    # Sudeste
+    "MG": 31, "ES": 32, "RJ": 33, "SP": 35,
+    # Sul
+    "PR": 41, "SC": 42, "RS": 43,
+    # Centro-Oeste
+    "MS": 50, "MT": 51, "GO": 52, "DF": 53,
+}
 
 #: Quantidade oficial de municípios por UF (divisão territorial vigente).
-#: Usado apenas como conferência do que a API de Malhas devolve — se o total
-#: divergir, a malha baixada está incompleta e o mapa sairia com buracos.
-MUNICIPIOS_POR_UF_SUL = {"PR": 399, "SC": 295, "RS": 497}
+#:
+#: Usado como conferência do que a API de Malhas devolve — se o total divergir,
+#: a malha baixada está incompleta e o mapa sairia com buracos onde deveria
+#: mostrar zero. A SOMA das 27 entradas tem de dar exatamente `TOTAL_MUNICIPIOS_BR`,
+#: e é isso que `test_tabela_de_municipios_soma_o_brasil` cobra: uma tabela com
+#: um número errado transformaria a barreira contra malha incompleta na própria
+#: fonte do erro.
+MUNICIPIOS_POR_UF = {
+    "RO": 52, "AC": 22, "AM": 62, "RR": 15, "PA": 144, "AP": 16, "TO": 139,
+    "MA": 217, "PI": 224, "CE": 184, "RN": 167, "PB": 223,
+    "PE": 185, "AL": 102, "SE": 75, "BA": 417,
+    "MG": 853, "ES": 78, "RJ": 92, "SP": 645,
+    "PR": 399, "SC": 295, "RS": 497,
+    "MS": 79, "MT": 141, "GO": 246, "DF": 1,
+}
+
+#: Total de municípios do Brasil na divisão territorial vigente.
+TOTAL_MUNICIPIOS_BR = 5570
+
+#: As cinco grandes regiões do IBGE -> as UFs de cada uma.
+#:
+#: A ordem das chaves é a do IBGE (Norte -> Centro-Oeste) e é a ordem em que os
+#: botões de região aparecem na barra de controles do mapa. Dentro de cada
+#: região as UFs vão na ordem de código, que é como o IBGE as publica.
+REGIOES = {
+    "Norte": ["RO", "AC", "AM", "RR", "PA", "AP", "TO"],
+    "Nordeste": ["MA", "PI", "CE", "RN", "PB", "PE", "AL", "SE", "BA"],
+    "Sudeste": ["MG", "ES", "RJ", "SP"],
+    "Sul": ["PR", "SC", "RS"],
+    "Centro-Oeste": ["MS", "MT", "GO", "DF"],
+}
+
+#: UF -> nome da região dela. Derivado de `REGIOES` para que exista uma fonte
+#: só: acrescentar uma UF lá já a coloca aqui.
+REGIAO_POR_UF = {uf: regiao for regiao, ufs in REGIOES.items() for uf in ufs}
+
+#: Nome oficial de cada UF, para os rótulos da lista de estados do mapa.
+#:
+#: A busca da barra de controles casa contra ESTE texto, e não contra a sigla:
+#: digitar "Rio" precisa achar Rio de Janeiro, Rio Grande do Norte e Rio Grande
+#: do Sul, o que a sigla sozinha não permite.
+NOME_UF = {
+    "RO": "Rondônia", "AC": "Acre", "AM": "Amazonas", "RR": "Roraima",
+    "PA": "Pará", "AP": "Amapá", "TO": "Tocantins",
+    "MA": "Maranhão", "PI": "Piauí", "CE": "Ceará",
+    "RN": "Rio Grande do Norte", "PB": "Paraíba", "PE": "Pernambuco",
+    "AL": "Alagoas", "SE": "Sergipe", "BA": "Bahia",
+    "MG": "Minas Gerais", "ES": "Espírito Santo", "RJ": "Rio de Janeiro",
+    "SP": "São Paulo",
+    "PR": "Paraná", "SC": "Santa Catarina", "RS": "Rio Grande do Sul",
+    "MS": "Mato Grosso do Sul", "MT": "Mato Grosso", "GO": "Goiás",
+    "DF": "Distrito Federal",
+}
+
+#: Todas as 27 UFs, na ordem de código — o recorte nacional.
+SIGLAS_BR = sorted(CODIGO_UF, key=lambda uf: CODIGO_UF[uf])
+
+#: Recorte territorial PADRÃO: a Região Sul.
+#:
+#: É o recorte com que o projeto nasceu e o que `python main.py` sem argumentos
+#: continua produzindo. Trocá-lo é passar ``--ufs`` na linha de comando.
+#:
+#: A ordem é RS, SC, PR — a que o projeto sempre usou, e não a de código do
+#: IBGE de `REGIOES`. Ela é preservada porque a ordem do recorte é a ordem em
+#: que as UFs aparecem no filtro de estado da barra: reordená-las trocaria os
+#: botões de lugar sem que nenhum dado mudasse.
+RECORTE_PADRAO = ["RS", "SC", "PR"]
+
+#: Recorte ATIVO desta execução — a lista de UFs que o pipeline inteiro enxerga.
+#:
+#: É a única constante deste bloco que muda em tempo de execução, e por isso
+#: todo mundo a lê como ``config.SIGLAS_UF`` na hora de usar, nunca a captura
+#: num valor default de parâmetro: um default é avaliado na importação do
+#: módulo, ou seja, ANTES de `definir_recorte` rodar, e congelaria o Sul.
+SIGLAS_UF = list(RECORTE_PADRAO)
+
+
+def definir_recorte(ufs: list[str]) -> list[str]:
+    """Fixa o recorte territorial desta execução.
+
+    Chamado uma vez, por `main`, logo depois de processar a linha de comando e
+    antes de qualquer etapa do pipeline.
+
+    A ORDEM RECEBIDA É PRESERVADA (só a caixa é normalizada e a repetição
+    removida), porque ela é visível: é nela que as UFs aparecem no filtro de
+    estado da barra do mapa. Ordenar por código aqui trocaria os três botões do
+    recorte padrão de lugar sem nenhum dado ter mudado. Onde a ordem NÃO pode
+    depender de digitação — o slug do arquivo — quem ordena é `slug_recorte`.
+
+    Args:
+        ufs: siglas do recorte, ex.: ``["SC", "RS", "PR"]``.
+
+    Returns:
+        A lista já normalizada, a mesma que ficou em `SIGLAS_UF`.
+
+    Raises:
+        ValueError: se a lista vier vazia ou trouxer uma sigla inexistente.
+    """
+    global SIGLAS_UF
+
+    normalizadas: list[str] = []
+    for uf in ufs:
+        sigla = str(uf).strip().upper()
+        if sigla and sigla not in normalizadas:
+            normalizadas.append(sigla)
+
+    if not normalizadas:
+        raise ValueError("O recorte territorial não pode ser vazio.")
+
+    desconhecidas = sorted(set(normalizadas) - set(CODIGO_UF))
+    if desconhecidas:
+        raise ValueError(
+            f"UF inexistente no recorte: {desconhecidas!r}. "
+            f"As siglas válidas são {sorted(CODIGO_UF)!r}."
+        )
+
+    SIGLAS_UF = normalizadas
+    return SIGLAS_UF
+
+
+def interpretar_recorte(texto: str) -> list[str]:
+    """Converte a forma escrita de um recorte na lista de siglas.
+
+    Aceita três formas, nesta ordem: ``BR`` (as 27 UFs), o nome de uma região
+    (``Sul``, ``Centro-Oeste``, sem depender de acento, hífen ou caixa) e uma
+    lista de siglas separadas por vírgula.
+
+    Mora aqui, e não no `main`, porque tem DOIS chamadores: a opção ``--ufs``
+    da linha de comando e a variável de ambiente `VARIAVEL_RECORTE`, que é como
+    o `pytest` — que não tem argumentos próprios — aponta para outro recorte.
+
+    Args:
+        texto: a forma escrita, ex.: ``"BR"``, ``"Sul"``, ``"RS,SC,PR"``.
+
+    Returns:
+        A lista de siglas, ainda não validada (quem valida é `definir_recorte`).
+
+    Raises:
+        ValueError: se o texto não render nenhuma sigla.
+    """
+    limpo = texto.strip()
+    if limpo.upper() == "BR":
+        return list(SIGLAS_BR)
+
+    sem_pontuacao = limpo.replace("-", " ").replace("_", " ").casefold()
+    for regiao, ufs in REGIOES.items():
+        if regiao.replace("-", " ").casefold() == sem_pontuacao:
+            return list(ufs)
+
+    siglas = [parte.strip().upper() for parte in limpo.split(",") if parte.strip()]
+    if not siglas:
+        raise ValueError(
+            f"Recorte não reconhecido: {texto!r}. Use BR, o nome de uma região "
+            f"({', '.join(REGIOES)}) ou siglas separadas por vírgula "
+            "(ex.: RS,SC,PR)."
+        )
+    return siglas
+
+
+#: Variável de ambiente que fixa o recorte fora da linha de comando.
+#:
+#: Existe para o `pytest`, que roda sem argumentos próprios e leria sempre os
+#: artefatos do recorte padrão: ``MAPA_IF_UFS=BR pytest`` faz os testes
+#: conferirem os artefatos nacionais. Fora dos testes, prefira ``--ufs``.
+VARIAVEL_RECORTE = "MAPA_IF_UFS"
+
+_recorte_do_ambiente = os.environ.get(VARIAVEL_RECORTE, "").strip()
+if _recorte_do_ambiente:
+    definir_recorte(interpretar_recorte(_recorte_do_ambiente))
+
+
+def recorte(ufs: list[str] | None = None) -> list[str]:
+    """Resolve o recorte a usar: o informado, ou o ativo.
+
+    O atalho que evita repetir ``ufs if ufs is not None else config.SIGLAS_UF``
+    em cada função do pipeline que aceita um recorte explícito.
+
+    Args:
+        ufs: recorte explícito; ``None`` usa `SIGLAS_UF`.
+
+    Returns:
+        Uma cópia da lista de siglas.
+    """
+    return list(SIGLAS_UF if ufs is None else ufs)
+
+
+def municipios_esperados(ufs: list[str] | None = None) -> dict[str, int]:
+    """Quantos municípios a malha do recorte tem de trazer, por UF.
+
+    É o recorte de `MUNICIPIOS_POR_UF`, e é contra ELE que `src.pipeline`
+    compara a malha baixada — comparar contra a tabela inteira reprovaria
+    qualquer recorte menor que o Brasil.
+
+    Args:
+        ufs: recorte explícito; ``None`` usa o ativo.
+
+    Returns:
+        ``{sigla: quantidade}``, só com as UFs do recorte.
+    """
+    return {uf: MUNICIPIOS_POR_UF[uf] for uf in recorte(ufs)}
+
+
+def regioes_do_recorte(ufs: list[str] | None = None) -> dict[str, list[str]]:
+    """As regiões que o recorte alcança, cada uma só com as UFs presentes.
+
+    É o que alimenta os botões de região da barra de controles: com o recorte
+    do Sul a barra mostra uma região só, com as três UFs dela, sem precisar de
+    dado nacional nenhum.
+
+    Args:
+        ufs: recorte explícito; ``None`` usa o ativo.
+
+    Returns:
+        ``{região: [siglas]}``, na ordem de `REGIOES`, sem as regiões vazias.
+    """
+    presentes = set(recorte(ufs))
+    return {
+        regiao: [uf for uf in ufs_da_regiao if uf in presentes]
+        for regiao, ufs_da_regiao in REGIOES.items()
+        if presentes & set(ufs_da_regiao)
+    }
+
+
+def nome_do_recorte(ufs: list[str] | None = None) -> str:
+    """Nome legível do recorte, para cabeçalho de log e resumo de execução.
+
+    Args:
+        ufs: recorte explícito; ``None`` usa o ativo.
+
+    Returns:
+        ``"Brasil (27 UFs)"``, ``"Região Sul (PR, SC, RS)"`` ou a lista de
+        siglas, conforme o recorte case ou não com o país ou com uma região.
+    """
+    atual = recorte(ufs)
+    if set(atual) == set(SIGLAS_BR):
+        return f"Brasil ({len(atual)} UFs)"
+    for regiao, ufs_da_regiao in REGIOES.items():
+        if set(atual) == set(ufs_da_regiao):
+            return f"Região {regiao} ({', '.join(atual)})"
+    return ", ".join(atual)
+
+
+#: Como um nome de região vira pedaço de nome de arquivo.
+#:
+#: São cinco, e escrever a tabela à mão evita arrastar o `unidecode` para
+#: dentro do `config`, que hoje não importa nada do projeto.
+_SLUG_REGIAO = {
+    "Norte": "norte",
+    "Nordeste": "nordeste",
+    "Sudeste": "sudeste",
+    "Sul": "sul",
+    "Centro-Oeste": "centro-oeste",
+}
+
+
+def slug_recorte(ufs: list[str] | None = None) -> str:
+    """Identificador curto do recorte, usado no nome de cada artefato.
+
+    Existe para que dois recortes NÃO sobrescrevam o cache um do outro: sem
+    ele, um ``--ufs BR`` gravaria a malha nacional por cima de
+    ``malha_municipios_sul.geojson`` e a execução seguinte do recorte padrão
+    leria 5.570 municípios acreditando ler 1.191 — sem nada falhar.
+
+    O recorte padrão continua produzindo ``"sul"``, ou seja, exatamente os
+    nomes de arquivo que o projeto já usava.
+
+    Args:
+        ufs: recorte explícito; ``None`` usa o ativo.
+
+    Returns:
+        ``"br"`` para o país inteiro, o nome da região quando o recorte é
+        exatamente uma delas, e as siglas unidas por ``-`` no resto dos casos.
+    """
+    atual = recorte(ufs)
+    if set(atual) == set(SIGLAS_BR):
+        return "br"
+    for regiao, ufs_da_regiao in REGIOES.items():
+        if set(atual) == set(ufs_da_regiao):
+            return _SLUG_REGIAO[regiao]
+    return "-".join(sorted(atual)).lower()
+
+
+# --------------------------------------------------------------------------- #
+# Artefatos derivados do recorte
+# --------------------------------------------------------------------------- #
+#
+# Os cinco caminhos abaixo são FUNÇÕES, e não constantes, porque o nome de cada
+# um carrega o slug do recorte (ver `slug_recorte`). Como constante, o valor
+# seria fixado na importação do módulo — antes de `definir_recorte` rodar — e
+# uma execução nacional gravaria tudo com nome de Sul.
+#
+# Ninguém os usa como valor default de parâmetro pelo mesmo motivo: os módulos
+# declaram ``caminho: Path | None = None`` e resolvem na primeira linha.
+
+
+def arquivo_if_categorizado(ufs: list[str] | None = None) -> Path:
+    """Dataset do BACEN recortado e classificado (saída de `src.etl_bacen`)."""
+    return PROCESSED_DIR / f"if_{slug_recorte(ufs)}_categorizado.parquet"
+
+
+def arquivo_malha(ufs: list[str] | None = None) -> Path:
+    """Malha municipal crua do IBGE, em cache (`ibge_malha.baixar_malha`)."""
+    return RAW_DIR / f"malha_municipios_{slug_recorte(ufs)}.geojson"
+
+
+def arquivo_agregado_municipio(ufs: list[str] | None = None) -> Path:
+    """Uma linha por município, com geometria (saída de `src.agregacao`)."""
+    return PROCESSED_DIR / f"agregado_municipio_{slug_recorte(ufs)}.parquet"
+
+
+def arquivo_pontos_geocodificados(ufs: list[str] | None = None) -> Path:
+    """Pontos com coordenada e nível de precisão (saída de `src.cnefe`)."""
+    return PROCESSED_DIR / f"pontos_geocodificados_{slug_recorte(ufs)}.parquet"
+
+
+def arquivo_mapa(ufs: list[str] | None = None) -> Path:
+    """HTML interativo autocontido (saída de `src.mapa`)."""
+    return OUTPUT_DIR / f"mapa_if_{slug_recorte(ufs)}.html"
 
 # --------------------------------------------------------------------------- #
 # APIs do IBGE (https://servicodados.ibge.gov.br/api/docs)
@@ -110,38 +442,122 @@ DIR_CNEFE = RAW_DIR / "cnefe"
 #: abaixo cobre uma conexão bem mais lenta antes de desistir.
 TIMEOUT_CNEFE = 1800
 
-#: Destino dos pontos de atendimento já com coordenada e nível de precisão.
-ARQUIVO_PONTOS_GEOCODIFICADOS = PROCESSED_DIR / "pontos_geocodificados.parquet"
+# O destino dos pontos geocodificados é derivado do recorte — ver
+# `arquivo_pontos_geocodificados`.
 
 # --------------------------------------------------------------------------- #
 # Malha territorial e agregação por município
 # --------------------------------------------------------------------------- #
-
-ARQUIVO_MALHA_SUL = RAW_DIR / "malha_municipios_sul.geojson"
-ARQUIVO_AGREGADO_MUNICIPIO = PROCESSED_DIR / "agregado_municipio.parquet"
+#
+# Os dois caminhos desta etapa também são derivados do recorte: ver
+# `arquivo_malha` e `arquivo_agregado_municipio`.
 
 # --------------------------------------------------------------------------- #
 # Mapa
 # --------------------------------------------------------------------------- #
 
-#: Centro inicial do mapa, como (latitude, longitude).
+#: Espaço, em pixels, que o cartão do mapa ocupa numa janela típica.
 #:
-#: É o centro da *bounding box* da malha dos 1.191 municípios do Sul, medida em
-#: EPSG:4326 sobre `ARQUIVO_AGREGADO_MUNICIPIO`: lon -57,65..-48,02 e
-#: lat -33,75..-22,52. Não é o centroide populacional nem geográfico da região —
-#: é o ponto que deixa o retângulo do recorte visualmente centralizado, que é o
-#: que importa no enquadramento inicial.
-CENTRO_MAPA = (-28.13, -52.84)
+#: É o orçamento contra o qual `zoom_da_caixa` decide o zoom de abertura. Não
+#: precisa ser exato: ele só separa um zoom do seguinte, e cada passo de zoom
+#: DOBRA o tamanho aparente, então qualquer valor entre ~580 e ~1.150 px de
+#: altura escolhe o mesmo zoom 6 para a Região Sul.
+LARGURA_UTIL_MAPA_PX = 1100
+ALTURA_UTIL_MAPA_PX = 700
 
-#: Zoom inicial do Leaflet/folium.
+#: Lado do bloco de ladrilhos do Leaflet, em pixels. No zoom `z` o mundo inteiro
+#: (360° de longitude) cabe em ``2**z`` blocos desses.
+LADO_LADRILHO_PX = 256
+
+#: Retângulo envolvente do Brasil, no formato ``[[sul, oeste], [norte, leste]]``.
 #:
-#: A região ocupa ~9,6° de longitude por ~11,2° de latitude. Em Web Mercator na
-#: latitude de -28° a distorção estica a altura em ~1/cos(28°) ≈ 1,13, então o
-#: recorte equivale a ~12,7° verticais — o lado que limita o enquadramento.
-#: No zoom 6 (5,625° por bloco de 256 px) isso dá ~580 px de altura, que cabe em
-#: uma janela de navegador típica; no zoom 7 passaria de 1.150 px e o mapa
-#: abriria com RS e PR cortados. Daí 6, e não 7.
-ZOOM_INICIAL = 6
+#: Enquadramento de partida de quem precisa de um mapa ANTES de haver malha
+#: carregada — hoje só o andaime `src.mapping`. O pipeline não o usa: lá o
+#: enquadramento sai da geometria de fato do recorte (`mapa.enquadramento_inicial`).
+CAIXA_BRASIL = [[-33.75, -73.99], [5.27, -28.85]]
+
+
+#: Piso e teto do zoom de abertura.
+#:
+#: O piso é o mundo inteiro; o teto existe para que um recorte de um município
+#: só não abra colado no telhado das casas. Nenhum dos dois é alcançado pelos
+#: recortes reais do projeto (a UF menor, o DF, dá zoom 9).
+ZOOM_MINIMO_ENQUADRAMENTO = 2
+ZOOM_MAXIMO_ENQUADRAMENTO = 12
+
+#: Piso de amplitude, em graus, para não dividir por zero num recorte de um
+#: ponto só (um único município degenerado, ou uma malha vazia).
+_GRAUS_MINIMOS = 0.05
+
+
+def centro_da_caixa(caixa: list[list[float]]) -> tuple[float, float]:
+    """Centro de um retângulo envolvente, como ``(latitude, longitude)``.
+
+    Não é o centroide populacional nem o geográfico do recorte — é o ponto que
+    deixa o retângulo visualmente centralizado, que é o que importa no
+    enquadramento de abertura. Os dois decimais são a precisão em que 1° vale
+    ~1 km: mais casas não mudam nada na tela e só sujam o resumo da execução.
+
+    Args:
+        caixa: ``[[sul, oeste], [norte, leste]]``, em graus decimais.
+
+    Returns:
+        ``(lat, lon)`` do centro, arredondado a duas casas.
+    """
+    (sul, oeste), (norte, leste) = caixa
+    return (round((sul + norte) / 2, 2), round((oeste + leste) / 2, 2))
+
+
+def zoom_da_caixa(
+    caixa: list[list[float]],
+    largura_px: int = LARGURA_UTIL_MAPA_PX,
+    altura_px: int = ALTURA_UTIL_MAPA_PX,
+) -> int:
+    """Maior zoom do Leaflet em que o retângulo inteiro ainda cabe na tela.
+
+    O cálculo é o que os comentários do projeto sempre descreveram à mão, agora
+    aplicado ao recorte carregado em vez de a uma constante:
+
+    1. no zoom ``z``, um bloco de `LADO_LADRILHO_PX` cobre ``360 / 2**z`` graus;
+    2. em Web Mercator a altura é esticada por ``1 / cos(latitude)``, então o
+       recorte "pesa" mais em graus verticais do que os que ele mede — a
+       correção é feita na latitude do centro, onde a distorção é a média;
+    3. o zoom escolhido é o maior em que largura E altura cabem no orçamento.
+
+    Conferência da Região Sul, o recorte padrão: 9,6° de longitude por 11,2° de
+    latitude, esticados a ~12,7° verticais na latitude de -28°. No zoom 6
+    (5,625° por bloco) isso dá ~580 px de altura, que cabe; no zoom 7 passaria
+    de 1.150 px e o mapa abriria com RS e PR cortados. Daí 6, e não 7 — o mesmo
+    valor que a constante `ZOOM_INICIAL` trazia fixo.
+
+    Args:
+        caixa: ``[[sul, oeste], [norte, leste]]``, em graus decimais.
+        largura_px: espaço horizontal disponível.
+        altura_px: espaço vertical disponível.
+
+    Returns:
+        Um zoom entre `ZOOM_MINIMO_ENQUADRAMENTO` e `ZOOM_MAXIMO_ENQUADRAMENTO`.
+    """
+    (sul, oeste), (norte, leste) = caixa
+
+    graus_horizontais = max(abs(leste - oeste), _GRAUS_MINIMOS)
+    # A latitude do centro, e não a do extremo: usar o extremo superestimaria a
+    # distorção do recorte inteiro pelo pedaço mais distorcido dele.
+    lat_central = math.radians(max(min((sul + norte) / 2, 85.0), -85.0))
+    graus_verticais = max(abs(norte - sul) / math.cos(lat_central), _GRAUS_MINIMOS)
+
+    melhor = ZOOM_MINIMO_ENQUADRAMENTO
+    for zoom in range(ZOOM_MINIMO_ENQUADRAMENTO, ZOOM_MAXIMO_ENQUADRAMENTO + 1):
+        graus_por_bloco = 360.0 / (2**zoom)
+        cabe = (
+            graus_horizontais / graus_por_bloco * LADO_LADRILHO_PX <= largura_px
+            and graus_verticais / graus_por_bloco * LADO_LADRILHO_PX <= altura_px
+        )
+        if not cabe:
+            break
+        melhor = zoom
+    return melhor
+
 
 #: Nome da camada base, para log e para o rótulo interno da camada.
 #:

@@ -264,6 +264,7 @@ Opções:
 
 | Argumento | Efeito |
 |---|---|
+| `--ufs RECORTE` | recorte territorial: `BR` para as 27 UFs, o nome de uma região (`Norte`, `Nordeste`, `Centro-Oeste`, `Sudeste`, `Sul`) ou siglas separadas por vírgula (`--ufs RS,SC,PR`). Padrão: a Região Sul. |
 | `--sem-cache-malha` | rebaixa a malha municipal da API do IBGE. Necessário só quando a divisão territorial muda. |
 | `--sem-cache-cnefe` | rebaixa os ~580 MB do CNEFE. Necessário só para se recuperar de um cache corrompido. |
 | `-v`, `--verbose` | log de nível DEBUG e traceback completo em caso de falha. |
@@ -282,11 +283,16 @@ durante o desenvolvimento.
 
 | # | Módulo | O que faz | Artefato |
 |---|---|---|---|
-| 1 | `src.etl_bacen` | recorta RS/SC/PR e as instituições-alvo, classifica bandeira | `data/processed/if_sul_categorizado.parquet` |
-| 2 | `src.ibge_malha` | malha municipal do Sul + nome oficial e população | `data/raw/malha_municipios_sul.geojson` |
-| 3 | `src.agregacao` | junta os dois pelo código IBGE, uma linha por município | `data/processed/agregado_municipio.parquet` |
-| 4 | `src.cnefe` | resolve a coordenada de cada ponto contra o CNEFE do Censo 2022 | `data/processed/pontos_geocodificados.parquet` |
+| 1 | `src.etl_bacen` | recorta o território e as instituições-alvo, classifica bandeira | `data/processed/if_sul_categorizado.parquet` |
+| 2 | `src.ibge_malha` | malha municipal do recorte + nome oficial e população | `data/raw/malha_municipios_sul.geojson` |
+| 3 | `src.agregacao` | junta os dois pelo código IBGE, uma linha por município | `data/processed/agregado_municipio_sul.parquet` |
+| 4 | `src.cnefe` | resolve a coordenada de cada ponto contra o CNEFE do Censo 2022 | `data/processed/pontos_geocodificados_sul.parquet` |
 | 5 | `src.mapa` | coroplético reativo, camadas de ponto e a moldura de página | `output/mapa_if_sul.html` |
+
+O `sul` nos nomes é o **slug do recorte**, e não parte fixa do nome: cada
+recorte grava com o seu (`if_br_categorizado.parquet`,
+`malha_municipios_sudeste.geojson`), de modo que trocar de recorte não
+sobrescreve o cache do anterior. Ver `config.slug_recorte`.
 
 A etapa 5 termina chamando `src.embutir`, que troca as tags de CDN escritas
 pelo folium pelo conteúdo dos arquivos. São ~700 KB em 14 bibliotecas,

@@ -1,8 +1,9 @@
 """Agregação dos pontos de atendimento por município.
 
-Junta o dataset categorizado do BACEN (``data/processed/if_sul_categorizado.parquet``)
-à malha municipal do IBGE e produz uma linha por município do Sul, com a
-contagem de pontos por `categoria_if` e por `sub_categoria`, mais a população.
+Junta o dataset categorizado do BACEN
+(``data/processed/if_<recorte>_categorizado.parquet``) à malha municipal do IBGE
+e produz uma linha por município do recorte, com a contagem de pontos por
+`categoria_if` e por `sub_categoria`, mais a população.
 
 O join é DIRETO pelo código IBGE do município — não é *spatial join*. Os dois
 motivos: (a) o BACEN já publica o código IBGE de cada ponto de atendimento, que
@@ -14,7 +15,7 @@ Uso (a partir da raiz do projeto, com o venv ativo)::
 
     python -m src.agregacao
 
-Saída: ``data/processed/agregado_municipio.parquet``.
+Saída: ``data/processed/agregado_municipio_<recorte>.parquet``.
 """
 
 from __future__ import annotations
@@ -75,10 +76,15 @@ SUFIXO_POR_SUB_CATEGORIA = {
 ORDEM_SUB_CATEGORIAS = list(SUFIXO_POR_SUB_CATEGORIA)
 
 #: Colunas de identificação do município, antes das contagens.
+#:
+#: `regiao` vem junto de `uf`, derivada uma vez em `ibge_malha` — ela é o que
+#: permite ao mapa recortar por região no navegador sem uma segunda tabela
+#: UF -> região embarcada no HTML.
 COLUNAS_IDENTIFICACAO = [
     "municipio_ibge",
     "municipio_nome",
     "uf",
+    "regiao",
     "populacao",
     "populacao_ano",
 ]
@@ -115,13 +121,12 @@ def _sufixo_coluna(sub_categoria: str) -> str:
 # --------------------------------------------------------------------------- #
 
 
-def carregar_pontos(
-    caminho: Path = config.ARQUIVO_IF_SUL_CATEGORIZADO,
-) -> pd.DataFrame:
+def carregar_pontos(caminho: Path | None = None) -> pd.DataFrame:
     """Lê o dataset categorizado do BACEN.
 
     Args:
-        caminho: caminho do ``.parquet`` produzido por `etl_bacen`.
+        caminho: caminho do ``.parquet`` produzido por `etl_bacen`; ``None``
+            deriva do recorte ativo.
 
     Returns:
         DataFrame com uma linha por ponto de atendimento.
@@ -130,6 +135,7 @@ def carregar_pontos(
         FileNotFoundError: se o arquivo não existir — rode `python -m src.etl_bacen`.
         KeyError: se faltar alguma coluna exigida pela agregação.
     """
+    caminho = caminho or config.arquivo_if_categorizado()
     if not caminho.exists():
         raise FileNotFoundError(
             f"Dataset não encontrado: {caminho}. "
@@ -293,7 +299,7 @@ def juntar_com_malha(
     todas as colunas de contagem.
 
     Args:
-        malha: saída de `ibge_malha.obter_malha_sul`.
+        malha: saída de `ibge_malha.obter_malha`.
         wide: saída de `pivotar_contagens`.
 
     Returns:
@@ -524,7 +530,7 @@ def relatar_cobertura(
         f"{len(config.BANCOS_ALVO)} bancos-alvo (BB, Bradesco, Itaú, Caixa, "
         "Santander).\n"
     )
-    print(f"Municípios na malha do Sul:        {total:>6}")
+    print(f"Municípios na malha do recorte:    {total:>6}")
     print(f"Com ao menos 1 ponto:              {total - n_sem:>6}")
     print(f"SEM nenhum ponto no escopo:        {n_sem:>6}  ({pct:.1f}%)\n")
 
@@ -589,7 +595,7 @@ def relatar_cobertura(
 
 def salvar_parquet(
     agregado: gpd.GeoDataFrame,
-    caminho: Path = config.ARQUIVO_AGREGADO_MUNICIPIO,
+    caminho: Path | None = None,
 ) -> Path:
     """Grava o agregado em Parquet, criando o diretório se necessário.
 
@@ -599,11 +605,12 @@ def salvar_parquet(
 
     Args:
         agregado: saída de `juntar_com_malha`.
-        caminho: destino do ``.parquet``.
+        caminho: destino do ``.parquet``; ``None`` deriva do recorte ativo.
 
     Returns:
         O caminho gravado.
     """
+    caminho = caminho or config.arquivo_agregado_municipio()
     caminho.parent.mkdir(parents=True, exist_ok=True)
     agregado.to_parquet(caminho, index=False)
     return caminho
@@ -623,8 +630,12 @@ def imprimir_resumo(agregado: gpd.GeoDataFrame) -> None:
     colunas_totais = [c for c in agregado.columns if c.startswith("total_")]
 
     print("=" * 78)
-    print("RESUMO — data/processed/agregado_municipio.parquet")
+    print(
+        "RESUMO — "
+        f"{config.arquivo_agregado_municipio().relative_to(config.BASE_DIR)}"
+    )
     print("=" * 78)
+    print(f"Recorte: {config.nome_do_recorte()}")
     print(f"Municípios: {len(agregado)}\n")
 
     print("-- soma de pontos por coluna --")
@@ -655,8 +666,8 @@ def imprimir_resumo(agregado: gpd.GeoDataFrame) -> None:
 
 
 def executar(
-    caminho_pontos: Path = config.ARQUIVO_IF_SUL_CATEGORIZADO,
-    destino: Path = config.ARQUIVO_AGREGADO_MUNICIPIO,
+    caminho_pontos: Path | None = None,
+    destino: Path | None = None,
     malha: gpd.GeoDataFrame | None = None,
     usar_cache_malha: bool = True,
 ) -> gpd.GeoDataFrame:
@@ -669,20 +680,23 @@ def executar(
     cobertura -> gravação.
 
     Args:
-        caminho_pontos: ``.parquet`` produzido por `etl_bacen`.
-        destino: destino do agregado.
-        malha: malha já carregada; se ``None``, chama
-            `ibge_malha.obter_malha_sul`.
-        usar_cache_malha: repassado a `ibge_malha.obter_malha_sul` quando a
-            malha não é fornecida.
+        caminho_pontos: ``.parquet`` produzido por `etl_bacen`; ``None`` deriva
+            do recorte ativo.
+        destino: destino do agregado; ``None`` deriva do recorte ativo.
+        malha: malha já carregada; se ``None``, chama `ibge_malha.obter_malha`.
+        usar_cache_malha: repassado a `ibge_malha.obter_malha` quando a malha
+            não é fornecida.
 
     Returns:
         O agregado por município.
     """
+    caminho_pontos = caminho_pontos or config.arquivo_if_categorizado()
+    destino = destino or config.arquivo_agregado_municipio()
+
     pontos = carregar_pontos(caminho_pontos)
 
     if malha is None:
-        malha = ibge_malha.obter_malha_sul(usar_cache=usar_cache_malha)
+        malha = ibge_malha.obter_malha(usar_cache=usar_cache_malha)
 
     contagem = contar_pontos(pontos)
     wide = pivotar_contagens(contagem)
