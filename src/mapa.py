@@ -625,6 +625,12 @@ TEXTO_BUSCA = "Buscar município\u2026"
 #: e "a" casa com quase todos. Duas já separam o suficiente para valer a pena.
 MIN_CARACTERES_BUSCA = 2
 
+#: Texto de apoio do combobox de estado, no lugar onde ele está vazio.
+#:
+#: "Todos" e não "Selecione": o campo vazio NÃO é um estado pendente de
+#: escolha, é o recorte inteiro — que é um estado válido e o inicial.
+TEXTO_ESTADO = "Todos"
+
 #: Quantas sugestões a busca mostra por vez.
 #:
 #: Oito cabem sem rolagem sob o campo e sem cobrir o mapa. Quem não achou o
@@ -1014,8 +1020,20 @@ html, body {
 }
 /* A explicação do modo fica FORA do botão: dentro, ela dobraria a altura da
    barra só para repetir o que o rótulo já diz na maior parte do tempo. */
+.barra-busca {
+    /* A busca de município fica na PONTA DIREITA da barra, sempre. É o único
+       controle que não recorta o mapa — ele navega — e mantê-lo separado dos
+       três que recortam (leitura, região, estado) é o que faz a barra ser lida
+       como "escopo à esquerda, ir para à direita". */
+    margin-left: auto;
+}
+/* `flex: 1 1 0` e não `1 1 60px`: com base zero a dica cede TODA a sua
+   largura antes de empurrar qualquer controle para a segunda linha. Ela é o
+   único item da barra que não é controle, e é por isso que ela cede primeiro.
+   Quem a esconde de vez, quando o que sobra não dá para ler, é `ajustarDica`
+   no controlador — a medida, e não um breakpoint. */
 .barra-dica {
-    flex: 1 1 60px;
+    flex: 1 1 0;
     min-width: 0;
     color: var(--tinta-suave);
     font-size: 11.5px;
@@ -1024,14 +1042,19 @@ html, body {
     overflow: hidden;
     text-overflow: ellipsis;
 }
+.barra-dica[hidden] { display: none; }
 
-/* --- Busca de município ------------------------------------------------- */
-.busca-municipio {
+/* --- Campos com lista de sugestões --------------------------------------- *
+   UMA estética de dropdown para os dois controles que a usam: a busca de
+   município e a lista de estados. `.combo` é a caixa (campo + lista flutuante)
+   e `.busca-sugestoes` é a lista; o que cada um define por conta própria é só
+   a largura. Duas aparências de lista na mesma barra seriam lidas como dois
+   componentes diferentes, quando o gesto é o mesmo: digitar, setas, Enter. */
+.combo {
     position: relative;
-    width: 232px;
     flex: none;
 }
-.busca-municipio input {
+.combo input {
     width: 100%;
     padding: 7px 10px;
     border: 1px solid var(--linha);
@@ -1040,12 +1063,39 @@ html, body {
     color: var(--tinta);
     font: 12px/1.4 var(--fonte);
 }
-.busca-municipio input::placeholder { color: var(--tinta-suave); }
-.busca-municipio input:focus {
+.combo input::placeholder { color: var(--tinta-suave); }
+.combo input:focus {
     outline: none;
     border-color: var(--turquesa);
     box-shadow: 0 0 0 3px rgba(20, 184, 166, 0.18);
 }
+.busca-municipio { width: 232px; }
+/* A lista de estados é mais estreita que a de municípios: o nome mais longo
+   ("Rio Grande do Norte") cabe, e a barra tem mais o que acomodar. */
+.combo-uf { width: 170px; }
+.combo-uf input { padding-right: 26px; }
+/* O "x" que devolve o recorte à região inteira. Só aparece com um estado
+   escolhido — sem estado não há o que limpar, e um botão inerte na barra é
+   um convite a um clique que não faz nada. */
+.combo-limpar {
+    position: absolute;
+    top: 50%;
+    right: 4px;
+    transform: translateY(-50%);
+    padding: 0 5px;
+    border: none;
+    border-radius: 5px;
+    background: none;
+    color: var(--tinta-suave);
+    font: 15px/1 var(--fonte);
+    cursor: pointer;
+}
+.combo-limpar:hover { color: var(--petroleo); background: var(--papel); }
+.combo-limpar:focus-visible {
+    outline: 2px solid var(--turquesa);
+    outline-offset: 1px;
+}
+.combo-limpar[hidden] { display: none; }
 /* A lista flutua sobre o mapa (`position: absolute` + z-index acima dos
    controles do Leaflet, que vão até 1000): dentro do fluxo ela empurraria a
    barra e o mapa para baixo a cada tecla digitada. */
@@ -1545,6 +1595,32 @@ html, body {
     padding: 0;
 }
 
+/* --- A ordem em que a barra cede ---------------------------------------- *
+   A barra é uma linha só, com `flex-wrap`. Ela carrega cinco coisas — leitura,
+   região, estado, a dica do modo e a busca de município — e a soma delas não
+   cabe em qualquer largura. A ordem de quebra é decidida, e não deixada ao
+   acaso do `flex-wrap`:
+
+   1. a DICA cede primeiro, e cede continuamente: `flex: 1 1 0` a faz devolver
+      largura até zero antes de empurrar qualquer controle. Ela é o único item
+      que não é controle — a explicação do modo que está marcado no botão ao
+      lado —, e some de vez quando o que sobra não dá para ler;
+   2. depois dela, a BUSCA DE MUNICÍPIO desce para a segunda linha, inteira, e
+      continua encostada à direita. Ela desce por último porque é o único
+      controle que encolhe mal: um campo de 120 px não mostra o nome que está
+      sendo digitado;
+   3. abaixo de 1000 px o layout inteiro vira coluna (bloco seguinte).
+
+   O ponto 1 NÃO é um breakpoint, e isso é deliberado: a largura em que a dica
+   deixa de caber depende de quantos botões de região existem, que é o recorte
+   quem decide — dois no Sul, seis no Brasil. Qualquer largura fixa acertaria
+   um recorte e erraria o outro. Quem decide é `ajustarDica`, medindo o espaço
+   que sobrou. O ponto 2 é breakpoint porque a busca tem largura fixa. */
+@media (max-width: 1180px) {
+    .barra-busca { flex: 1 1 100%; margin-left: 0; }
+    .busca-municipio { width: 100%; }
+}
+
 /* --- Telas estreitas ---------------------------------------------------- *
    Abaixo de 1000 px o lado a lado não cabe: a coluna desce para baixo do
    mapa, os dois ganham altura fixa e a página volta a rolar. */
@@ -1556,9 +1632,7 @@ html, body {
     .cartao-mapa { height: 62vh; min-height: 380px; flex: none; }
     .coluna-lateral { width: 100%; }
     .cartao-bandeiras, .cartao-ranking { height: 340px; flex: none; }
-    .barra-busca { flex: 1 1 100%; }
-    .busca-municipio { width: 100%; }
-    .barra-dica { display: none; }
+    .combo-uf { flex: 1 1 140px; width: auto; }
 }
 """
 
@@ -1599,6 +1673,11 @@ def carregar_agregado(caminho: Path | None = None) -> gpd.GeoDataFrame:
         "municipio_ibge",
         "municipio_nome",
         "uf",
+        # `regiao` é exigida desde que o filtro da barra virou hierárquico: sem
+        # ela não há botão de região nem `limites_por_regiao`. Um agregado
+        # gerado antes dela falha AQUI, com a instrução de regerá-lo, em vez de
+        # quebrar com um KeyError lá adiante.
+        "regiao",
         "populacao",
         "total_bancos",
         "total_cooperativas",
@@ -2139,6 +2218,67 @@ def enquadramento_inicial(
     return config.centro_da_caixa(caixa), config.zoom_da_caixa(caixa)
 
 
+def limites_por_regiao(agregado: gpd.GeoDataFrame) -> dict[str, list[list[float]]]:
+    """Retângulo envolvente de cada região presente, no formato do Leaflet.
+
+    O equivalente de `limites_por_uf` um nível acima: é o que o botão de região
+    usa para reenquadrar. Sai da geometria de fato, e não de uma tabela de
+    caixas por região — a caixa da região é a do que está no recorte, e não a
+    da região inteira do país: com o recorte do Sul, "Sul" enquadra RS, SC e
+    PR; num recorte que tivesse só SP, "Sudeste" enquadra São Paulo.
+
+    Args:
+        agregado: saída de `carregar_agregado`.
+
+    Returns:
+        ``{nome da região: [[sul, oeste], [norte, leste]]}``.
+    """
+    limites: dict[str, list[list[float]]] = {}
+    for regiao, do_grupo in agregado.groupby("regiao"):
+        oeste, sul, leste, norte = do_grupo.total_bounds
+        limites[str(regiao)] = [
+            [float(sul), float(oeste)],
+            [float(norte), float(leste)],
+        ]
+    return limites
+
+
+def regioes_do_recorte(agregado: gpd.GeoDataFrame) -> dict[str, list[str]]:
+    """Regiões presentes no agregado, cada uma com as UFs que ela tem ALI.
+
+    É o que alimenta os botões de região da barra: com o recorte padrão a
+    barra mostra uma região só, a Sul, com as três UFs dela — o controle é
+    hierárquico sem exigir dado nacional.
+
+    A ordem das regiões é a de `config.REGIOES` (a do IBGE, Norte ->
+    Centro-Oeste); a das UFs dentro de cada uma é a de `ufs_do_recorte`, que
+    respeita a ordem declarada no recorte.
+
+    Args:
+        agregado: saída de `carregar_agregado`.
+
+    Returns:
+        Ex.: ``{"Sul": ["RS", "SC", "PR"]}``.
+    """
+    por_regiao: dict[str, list[str]] = {}
+    for uf in ufs_do_recorte(agregado):
+        regiao = config.REGIAO_POR_UF.get(uf)
+        if regiao is None:
+            _LOGGER.warning(
+                "UF %r sem região em config.REGIAO_POR_UF; ficou fora dos "
+                "botões de região.",
+                uf,
+            )
+            continue
+        por_regiao.setdefault(regiao, []).append(uf)
+
+    return {
+        regiao: por_regiao[regiao]
+        for regiao in config.REGIOES
+        if regiao in por_regiao
+    }
+
+
 def ufs_do_recorte(agregado: gpd.GeoDataFrame) -> list[str]:
     """UFs presentes no agregado, na ordem em que o filtro de estado as mostra.
 
@@ -2255,11 +2395,17 @@ def adicionar_moldura(mapa: folium.Map, agregado: gpd.GeoDataFrame) -> None:
 
     Args:
         mapa: mapa base.
-        agregado: saída de `carregar_agregado`, de onde sai a lista de UFs do
-            filtro de estado.
+        agregado: saída de `carregar_agregado`, de onde saem as regiões dos
+            botões-segmento e as UFs da lista de estados.
     """
     modos = [(modo["id"], html.escape(modo["rotulo"])) for modo in MODOS_VISAO]
-    ufs = [("", "Todos")] + [(uf, uf) for uf in ufs_do_recorte(agregado)]
+    # Os botões-segmento agora são de REGIÃO, e não de UF: com 27 estados eles
+    # não caberiam numa linha, e a hierarquia região -> estado é a que o leitor
+    # já tem na cabeça. O estado virou uma lista pesquisável, montada pelo
+    # controlador — ver `_JS_CONTROLADOR`.
+    regioes = [("", "Todas")] + [
+        (regiao, html.escape(regiao)) for regiao in regioes_do_recorte(agregado)
+    ]
 
     moldura = f"""
 <div class="app">
@@ -2293,16 +2439,32 @@ def adicionar_moldura(mapa: folium.Map, agregado: gpd.GeoDataFrame) -> None:
       </div>
       <div class="barra-divisor"></div>
       <div class="barra-grupo">
+        <span class="barra-rotulo">Região</span>
+        {_segmentos("filtro-regiao", regioes, "")}
+      </div>
+      <div class="barra-divisor"></div>
+      <div class="barra-grupo">
         <span class="barra-rotulo">Estado</span>
-        {_segmentos("filtro-uf", ufs, "")}
+        <div class="combo combo-uf">
+          <input id="uf-campo" type="text" autocomplete="off" role="combobox"
+                 aria-expanded="false" aria-controls="uf-lista"
+                 aria-autocomplete="list"
+                 placeholder="{html.escape(TEXTO_ESTADO)}"
+                 aria-label="{html.escape(TEXTO_ESTADO)}">
+          <button type="button" class="combo-limpar" id="uf-limpar" hidden
+                  aria-label="Limpar o filtro de estado">&times;</button>
+          <ul class="busca-sugestoes" id="uf-lista" role="listbox" hidden></ul>
+        </div>
       </div>
       <div class="barra-dica" id="dica-modo"></div>
       <div class="barra-grupo barra-busca">
-        <div class="busca-municipio">
-          <input id="busca-campo" type="text" autocomplete="off"
+        <div class="combo busca-municipio">
+          <input id="busca-campo" type="text" autocomplete="off" role="combobox"
+                 aria-expanded="false" aria-controls="busca-lista"
+                 aria-autocomplete="list"
                  placeholder="{html.escape(TEXTO_BUSCA)}"
                  aria-label="{html.escape(TEXTO_BUSCA)}">
-          <ul class="busca-sugestoes" id="busca-lista" hidden></ul>
+          <ul class="busca-sugestoes" id="busca-lista" role="listbox" hidden></ul>
         </div>
       </div>
     </div>
@@ -3258,16 +3420,48 @@ _JS_CONTROLADOR = """
        desabilitada em nenhum dos três. */
     var modo = cfg.modoInicial;
 
-    /* UF em foco no filtro de estado; `null` significa as três. */
+    /* O recorte territorial é HIERÁRQUICO: uma região e, dentro dela, um
+       estado. `null` nos dois significa o recorte inteiro.
+
+       Os dois nunca se contradizem, e isso é garantido nos dois sentidos por
+       `selecionarRegiao` e `selecionarUf`, não por conferência posterior. */
+    var regiaoSelecionada = null;
     var ufSelecionada = null;
 
     function mostraCidade() { return modo !== cfg.modoPontos; }
     function mostraPontos() { return modo !== cfg.modoCidade; }
 
-    /* Serve tanto às propriedades de um município quanto a um item do índice
-       da busca: os dois carregam a sigla em `uf`. */
+    /* As UFs que o recorte atual deixa passar, resolvidas UMA vez a cada
+       mudança de seleção em vez de a cada município testado.
+
+       `todas` é o caminho rápido do estado inicial, que é também o mais caro:
+       sem ele, a visão nacional pagaria uma consulta ao conjunto para cada um
+       dos 5.570 municípios, a cada repintura. */
+    var recorte = {conjunto: {}, lista: [], todas: true};
+
+    function resolverRecorte() {
+        var lista;
+        if (ufSelecionada) {
+            lista = [ufSelecionada];
+        } else if (regiaoSelecionada) {
+            lista = cfg.ufsPorRegiao[regiaoSelecionada] || [];
+        } else {
+            lista = cfg.ufs;
+        }
+        recorte.lista = lista;
+        recorte.todas = lista === cfg.ufs;
+        recorte.conjunto = {};
+        lista.forEach(function (uf) { recorte.conjunto[uf] = true; });
+    }
+
+    /* O ÚNICO teste de pertinência ao recorte do mapa inteiro. Serve às
+       propriedades de um município, aos itens do índice da busca e — por
+       `marcadoresDe`, que lê a mesma `recorte.lista` — aos marcadores. A
+       região entra por aqui, e não por um segundo caminho: dois testes de
+       recorte discordariam no primeiro caso de canto, e o sintoma seria um
+       município pintado que a busca não acha. */
     function dentroDoRecorte(comUf) {
-        return !ufSelecionada || comUf.uf === ufSelecionada;
+        return recorte.todas || recorte.conjunto[comUf.uf] === true;
     }
 
     /* Trocar de modo NÃO adiciona nem remove camada nenhuma: o que muda é a
@@ -3343,6 +3537,44 @@ _JS_CONTROLADOR = """
         var escolhido = null;
         cfg.modos.forEach(function (m) { if (m.id === modo) { escolhido = m; } });
         caixa.textContent = escolhido ? escolhido.dica : "";
+        ajustarDica();
+    }
+
+    /* Abaixo disto a dica vira reticências e mais nada: é largura que ocupa a
+       barra sem informar. */
+    var LARGURA_MINIMA_DICA = 150;
+
+    /* A dica aparece quando sobra espaço para ela ser LIDA.
+
+       O que se mede é o VÃO LIVRE, e não a largura da própria dica: escondê-la
+       para medir mudaria a medida, e o teste entraria em laço — apareceria e
+       sumiria a cada quadro. Com a dica fora da soma, o número é estável nos
+       dois estados.
+
+       Uma barra que já quebrou em duas linhas dá um vão negativo, porque a
+       soma dos itens passa da largura de uma linha. É o resultado certo: numa
+       barra apertada a ponto de quebrar, a dica é a primeira coisa a sair. */
+    function ajustarDica() {
+        var caixa = document.getElementById("dica-modo");
+        var barra = caixa && caixa.parentNode;
+        if (!caixa || !barra) { return; }
+
+        var ocupado = 0;
+        Array.prototype.forEach.call(barra.children, function (filho) {
+            if (filho !== caixa) {
+                ocupado += filho.getBoundingClientRect().width;
+            }
+        });
+
+        var estilo = window.getComputedStyle(barra);
+        var vao = parseFloat(estilo.columnGap) || 0;
+        var livre = barra.clientWidth
+            - (parseFloat(estilo.paddingLeft) || 0)
+            - (parseFloat(estilo.paddingRight) || 0)
+            - ocupado
+            - vao * (barra.children.length - 1);
+
+        caixa.hidden = livre < LARGURA_MINIMA_DICA;
     }
 
     function ligarSeletorDeModo() {
@@ -3393,8 +3625,21 @@ _JS_CONTROLADOR = """
         if (noMapa && emLote) { pai.addLayers(marcadores); }
     }
 
+    /* Os marcadores não passam por `dentroDoRecorte` ponto a ponto: eles saem
+       do índice por UF montado na carga. Mas a LISTA de UFs é a mesma que
+       aquele teste usa (`recorte.lista`), então continua havendo uma regra só
+       — o que muda é só a estrutura de dados que a aplica em lote. */
     function marcadoresDe(s) {
-        return ufSelecionada ? (s.porUf[ufSelecionada] || []) : s.todos;
+        if (recorte.todas) { return s.todos; }
+        if (recorte.lista.length === 1) {
+            return s.porUf[recorte.lista[0]] || [];
+        }
+        var juntos = [];
+        recorte.lista.forEach(function (uf) {
+            var doEstado = s.porUf[uf];
+            if (doEstado) { juntos = juntos.concat(doEstado); }
+        });
+        return juntos;
     }
 
     function aplicarRecorteNosPontos() {
@@ -3448,10 +3693,18 @@ _JS_CONTROLADOR = """
        conteúdo mudou no primeiro quadro não informa nada. */
     var ANIMAR_ENQUADRAMENTO = false;
 
+    /* O nome do recorte, para os indicadores, a legenda e o ranking: o estado
+       quando há um, senão a região, senão nada (visão do recorte inteiro). */
+    function rotuloEscopo() {
+        return ufSelecionada || regiaoSelecionada || "";
+    }
+
     function enquadrar() {
         var limites = ufSelecionada
             ? cfg.limites[ufSelecionada]
-            : cfg.limites.todos;
+            : (regiaoSelecionada
+                ? cfg.limitesRegiao[regiaoSelecionada]
+                : cfg.limites.todos);
         if (limites) {
             mapa.fitBounds(limites, {
                 padding: [14, 14],
@@ -3460,8 +3713,13 @@ _JS_CONTROLADOR = """
         }
     }
 
-    function selecionarUf(uf) {
-        ufSelecionada = uf || null;
+    /* O que TODA mudança de recorte precisa refazer, na ordem: resolver quais
+       UFs valem, acertar o campo de estado, recontar os pontos, repintar e
+       reenquadrar. Ter um lugar só evita que uma das cinco seja esquecida em
+       um dos três caminhos que mexem no recorte. */
+    function aplicarRecorte() {
+        resolverRecorte();
+        escreverCampoUf();
         aplicarRecorteNosPontos();
         atualizarContagens();
         recalcular();
@@ -3469,11 +3727,46 @@ _JS_CONTROLADOR = """
         enquadrar();
     }
 
-    function ligarFiltroDeUf() {
-        var opcoes = document.querySelectorAll('input[name="filtro-uf"]');
+    function selecionarRegiao(regiao) {
+        regiaoSelecionada = regiao || null;
+        /* Trocar de região LIMPA o estado. A alternativa — manter o estado se
+           ele pertencer à nova região — é uma regra que ninguém consegue
+           prever antes de clicar, e o clique já reenquadra o mapa: o leitor
+           veria a região inteira num caso e um estado só no outro, sem saber
+           por quê. */
+        ufSelecionada = null;
+        aplicarRecorte();
+    }
+
+    function selecionarUf(uf) {
+        ufSelecionada = uf || null;
+        /* Escolher um estado de OUTRA região seleciona a região dele. É a
+           metade que falta para os dois controles nunca se contradizerem:
+           sem isto, a barra mostraria "Sul" com o Paraná... e São Paulo. */
+        if (ufSelecionada) {
+            var daUf = cfg.regiaoPorUf[ufSelecionada];
+            if (daUf && daUf !== regiaoSelecionada) {
+                regiaoSelecionada = daUf;
+                marcarRegiaoNaBarra(daUf);
+            }
+        }
+        aplicarRecorte();
+    }
+
+    /* O botão-segmento da região é marcado à mão quando quem escolheu foi a
+       lista de estados: o `checked` de um rádio não se move sozinho. */
+    function marcarRegiaoNaBarra(regiao) {
+        var opcoes = document.querySelectorAll('input[name="filtro-regiao"]');
+        for (var i = 0; i < opcoes.length; i++) {
+            opcoes[i].checked = (opcoes[i].value === (regiao || ""));
+        }
+    }
+
+    function ligarFiltroDeRegiao() {
+        var opcoes = document.querySelectorAll('input[name="filtro-regiao"]');
         for (var i = 0; i < opcoes.length; i++) {
             opcoes[i].addEventListener("change", function () {
-                selecionarUf(this.value);
+                selecionarRegiao(this.value);
             });
         }
     }
@@ -3486,10 +3779,11 @@ _JS_CONTROLADOR = """
        referência à feição, que é quem sabe os próprios limites. Nada de novo
        é embarcado no HTML por causa da busca. */
     var indice = [];
-    var sugestoes = [];
     var campoBusca = null;
-    var listaBusca = null;
-    var destacada = -1;
+    var comboMunicipio = null;
+    var comboUf = null;
+    var campoUf = null;
+    var botaoLimparUf = null;
 
     /* Os municípios atualmente listados no ranking, na ordem em que aparecem:
        é por esta lista que o clique numa linha chega à camada do município. */
@@ -3514,6 +3808,8 @@ _JS_CONTROLADOR = """
                 chave: normalizar(props.municipio_nome),
                 camada: camada
             });
+            /* A `regiao` não entra no item: `dentroDoRecorte` decide pela UF,
+               que já basta — a região só existe como conjunto de UFs. */
         });
         indice.sort(function (a, b) {
             return a.chave < b.chave ? -1 : (a.chave > b.chave ? 1 : 0);
@@ -3539,53 +3835,130 @@ _JS_CONTROLADOR = """
         return comeca.concat(contem).slice(0, cfg.maxSugestoes);
     }
 
-    function desenharSugestoes() {
-        if (!listaBusca) { return; }
-        destacada = -1;
-        listaBusca.innerHTML = "";
+    /* --------------------------------------------------------------------
+       Um combobox, dois usos
+       --------------------------------------------------------------------
 
-        if (!sugestoes.length) {
-            /* Campo curto demais não é "não achei", é "ainda não procurei". */
-            if (normalizar(campoBusca.value).length >= cfg.minBusca) {
-                var vazio = L.DomUtil.create("li", "busca-vazio", listaBusca);
-                vazio.textContent = "nenhum município";
-                listaBusca.hidden = false;
-            } else {
-                listaBusca.hidden = true;
-            }
-            return;
+       A busca de município e a lista de estados são o MESMO componente: um
+       campo de texto que filtra por digitação, uma lista flutuante, setas para
+       percorrer, Enter para escolher, Esc e clique fora para fechar. Escrever
+       a segunda como cópia da primeira criaria duas implementações do mesmo
+       gesto — e, pior, duas que divergem: a que recebesse a próxima correção
+       de teclado deixaria a outra para trás.
+
+       O que cada uso traz de próprio são as cinco funções de `op`: onde
+       procurar, como rotular cada linha, o que fazer com a escolhida, a partir
+       de quantos caracteres procurar e o que dizer quando não há nada. */
+    function criarCombo(op) {
+        var sugestoes = [];
+        var destacada = -1;
+
+        function fechar() {
+            op.lista.hidden = true;
+            op.campo.setAttribute("aria-expanded", "false");
+            destacada = -1;
         }
 
-        sugestoes.forEach(function (item, i) {
-            var linha = L.DomUtil.create("li", "", listaBusca);
-            linha.setAttribute("data-i", String(i));
-            /* `textContent`, e não `innerHTML`: o nome vem do dado. */
-            linha.textContent = item.nome + " ";
-            var uf = L.DomUtil.create("span", "busca-uf", linha);
-            uf.textContent = item.uf;
+        function destacar(alvo) {
+            var linhas = op.lista.querySelectorAll("li[data-i]");
+            if (!linhas.length) { return; }
+            destacada = (alvo + linhas.length) % linhas.length;
+            for (var i = 0; i < linhas.length; i++) {
+                var ativa = (i === destacada);
+                linhas[i].classList.toggle("ativa", ativa);
+                linhas[i].setAttribute("aria-selected", ativa ? "true" : "false");
+            }
+            linhas[destacada].scrollIntoView({block: "nearest"});
+        }
+
+        function desenhar() {
+            destacada = -1;
+            op.lista.innerHTML = "";
+
+            if (!sugestoes.length) {
+                /* Campo curto demais não é "não achei", é "ainda não
+                   procurei" — e a lista de estados, cujo mínimo é zero, sempre
+                   tem o que mostrar ao receber o foco. */
+                if (normalizar(op.campo.value).length < op.minimo) {
+                    fechar();
+                    return;
+                }
+                var vazio = L.DomUtil.create("li", "busca-vazio", op.lista);
+                vazio.textContent = op.vazio;
+            } else {
+                sugestoes.forEach(function (item, i) {
+                    var linha = L.DomUtil.create("li", "", op.lista);
+                    linha.setAttribute("data-i", String(i));
+                    linha.setAttribute("role", "option");
+                    linha.setAttribute("aria-selected", "false");
+                    /* `textContent`, e não `innerHTML`: o nome vem do dado. */
+                    linha.textContent = op.texto(item) + " ";
+                    var extra = op.sufixo(item);
+                    if (extra) {
+                        var span = L.DomUtil.create("span", "busca-uf", linha);
+                        span.textContent = extra;
+                    }
+                });
+            }
+            op.lista.hidden = false;
+            op.campo.setAttribute("aria-expanded", "true");
+        }
+
+        function atualizar() {
+            sugestoes = op.buscar(op.campo.value);
+            desenhar();
+        }
+
+        function escolher(i) {
+            if (!sugestoes[i]) { return; }
+            /* Fecha ANTES de entregar: `op.escolher` pode reescrever o campo,
+               e a lista da consulta anterior ficaria aberta por cima. */
+            var escolhido = sugestoes[i];
+            fechar();
+            op.escolher(escolhido);
+        }
+
+        op.campo.addEventListener("input", atualizar);
+        op.campo.addEventListener("focus", atualizar);
+        op.campo.addEventListener("keydown", function (e) {
+            if (e.key === "ArrowDown") {
+                if (op.lista.hidden) { atualizar(); }
+                destacar(destacada + 1);
+                e.preventDefault();
+            } else if (e.key === "ArrowUp") {
+                destacar(destacada - 1);
+                e.preventDefault();
+            } else if (e.key === "Enter") {
+                /* Sem nenhuma destacada, Enter leva à primeira: é o resultado
+                   que o usuário está olhando. */
+                escolher(destacada < 0 ? 0 : destacada);
+                e.preventDefault();
+            } else if (e.key === "Escape") {
+                fechar();
+            }
         });
-        listaBusca.hidden = false;
+
+        op.lista.addEventListener("click", function (e) {
+            var linha = e.target.closest("li[data-i]");
+            if (linha) { escolher(Number(linha.getAttribute("data-i"))); }
+        });
+        op.lista.addEventListener("mousemove", function (e) {
+            var linha = e.target.closest("li[data-i]");
+            if (linha) { destacar(Number(linha.getAttribute("data-i"))); }
+        });
+
+        /* Clique fora fecha a lista. O teste é pela caixa que embrulha campo e
+           sugestões, e não pelo campo: clicar numa sugestão é clicar fora do
+           <input>, e fechar a lista ali cancelaria a própria escolha. */
+        document.addEventListener("click", function (e) {
+            if (!op.campo.parentNode.contains(e.target)) { fechar(); }
+        });
+
+        return {atualizar: atualizar, fechar: fechar};
     }
 
     function atualizarBusca() {
-        if (!campoBusca) { return; }
-        sugestoes = candidatos(campoBusca.value);
-        desenharSugestoes();
-    }
-
-    function destacar(indiceAlvo) {
-        var linhas = listaBusca.querySelectorAll("li[data-i]");
-        if (!linhas.length) { return; }
-        destacada = (indiceAlvo + linhas.length) % linhas.length;
-        for (var i = 0; i < linhas.length; i++) {
-            linhas[i].classList.toggle("ativa", i === destacada);
-        }
-        linhas[destacada].scrollIntoView({block: "nearest"});
-    }
-
-    function fecharSugestoes() {
-        if (listaBusca) { listaBusca.hidden = true; }
-        destacada = -1;
+        if (comboMunicipio) { comboMunicipio.atualizar(); }
     }
 
     /* O popup do município é do GRUPO — o folium o vincula ao GeoJson inteiro
@@ -3615,7 +3988,6 @@ _JS_CONTROLADOR = """
            pontos ele abriria sobre um mapa sem coroplético nenhum. */
         if (mostraCidade()) { abrirPopupMunicipio(item.camada, limites.getCenter()); }
         if (vindoDaBusca && campoBusca) { campoBusca.value = item.nome; }
-        fecharSugestoes();
     }
 
     /* O campo vive na barra de controles, fora do mapa — e não mais como
@@ -3625,47 +3997,101 @@ _JS_CONTROLADOR = """
        Leaflet embaixo: fora do contêiner do mapa, não há o que interceptar. */
     function ligarBusca() {
         campoBusca = document.getElementById("busca-campo");
-        listaBusca = document.getElementById("busca-lista");
+        var listaBusca = document.getElementById("busca-lista");
         if (!campoBusca || !listaBusca) { return; }
 
-        campoBusca.addEventListener("input", atualizarBusca);
-        campoBusca.addEventListener("focus", atualizarBusca);
-        campoBusca.addEventListener("keydown", function (e) {
-            if (e.key === "ArrowDown") {
-                destacar(destacada + 1);
-                e.preventDefault();
-            } else if (e.key === "ArrowUp") {
-                destacar(destacada - 1);
-                e.preventDefault();
-            } else if (e.key === "Enter") {
-                /* Sem nenhuma destacada, Enter leva à primeira: é o resultado
-                   que o usuário está olhando. */
-                irPara(sugestoes[destacada < 0 ? 0 : destacada], true);
-                e.preventDefault();
-            } else if (e.key === "Escape") {
-                fecharSugestoes();
+        comboMunicipio = criarCombo({
+            campo: campoBusca,
+            lista: listaBusca,
+            minimo: cfg.minBusca,
+            vazio: "nenhum município",
+            buscar: candidatos,
+            texto: function (item) { return item.nome; },
+            sufixo: function (item) { return item.uf; },
+            escolher: function (item) { irPara(item, true); }
+        });
+    }
+
+    /* --------------------------------------------------------------------
+       Lista de estados
+       --------------------------------------------------------------------
+
+       O segundo nível do recorte. Ela mostra os estados da REGIÃO escolhida —
+       "Todas" mostra os do recorte inteiro — e casa contra o nome por extenso
+       além da sigla: digitar "Rio" tem de trazer Rio de Janeiro, Rio Grande do
+       Norte e Rio Grande do Sul, o que a sigla sozinha não permite. */
+    function ufsDisponiveis() {
+        return regiaoSelecionada
+            ? (cfg.ufsPorRegiao[regiaoSelecionada] || [])
+            : cfg.ufs;
+    }
+
+    function candidatosUf(termo) {
+        var alvo = normalizar(termo);
+        /* Com o campo já preenchido pela escolha anterior, o termo é o nome
+           inteiro do estado — e filtrar por ele deixaria a lista com um item
+           só. Voltar ao foco tem de mostrar as alternativas, não confirmar a
+           escolha feita. */
+        if (ufSelecionada && alvo === normalizar(nomeDaUf(ufSelecionada))) {
+            alvo = "";
+        }
+
+        var comeca = [];
+        var contem = [];
+        ufsDisponiveis().forEach(function (uf) {
+            if (!alvo) { comeca.push(uf); return; }
+            var posicao = normalizar(nomeDaUf(uf)).indexOf(alvo);
+            if (posicao === 0 || normalizar(uf).indexOf(alvo) === 0) {
+                comeca.push(uf);
+            } else if (posicao > 0) {
+                contem.push(uf);
             }
+        });
+        return comeca.concat(contem);
+    }
+
+    function nomeDaUf(uf) { return cfg.nomeUf[uf] || uf; }
+
+    /* O campo é o espelho do estado, e não a fonte dele: quem decide é
+       `ufSelecionada`, e esta função escreve o que isso significa na tela. */
+    function escreverCampoUf() {
+        if (campoUf) {
+            campoUf.value = ufSelecionada ? nomeDaUf(ufSelecionada) : "";
+        }
+        if (botaoLimparUf) { botaoLimparUf.hidden = !ufSelecionada; }
+        if (comboUf) { comboUf.fechar(); }
+    }
+
+    function ligarListaDeUf() {
+        campoUf = document.getElementById("uf-campo");
+        var listaUf = document.getElementById("uf-lista");
+        botaoLimparUf = document.getElementById("uf-limpar");
+        if (!campoUf || !listaUf) { return; }
+
+        comboUf = criarCombo({
+            campo: campoUf,
+            lista: listaUf,
+            minimo: 0,
+            vazio: "nenhum estado",
+            buscar: candidatosUf,
+            texto: nomeDaUf,
+            sufixo: function (uf) { return uf; },
+            escolher: selecionarUf
         });
 
-        listaBusca.addEventListener("click", function (e) {
-            var linha = e.target.closest("li[data-i]");
-            if (linha) {
-                irPara(sugestoes[Number(linha.getAttribute("data-i"))], true);
-            }
-        });
-        listaBusca.addEventListener("mousemove", function (e) {
-            var linha = e.target.closest("li[data-i]");
-            if (linha) { destacar(Number(linha.getAttribute("data-i"))); }
+        /* Sair do campo sem escolher devolve o texto ao estado real. Sem isto,
+           um nome digitado pela metade ficaria na barra afirmando um recorte
+           que não está aplicado. */
+        campoUf.addEventListener("blur", function () {
+            window.setTimeout(escreverCampoUf, 120);
         });
 
-        /* Clique fora fecha a lista. O teste é pela caixa que embrulha campo e
-           sugestões, e não pelo campo: clicar numa sugestão é clicar fora do
-           <input>, e fechar a lista ali cancelaria a própria escolha. */
-        document.addEventListener("click", function (e) {
-            if (campoBusca && !campoBusca.parentNode.contains(e.target)) {
-                fecharSugestoes();
-            }
-        });
+        if (botaoLimparUf) {
+            botaoLimparUf.addEventListener("click", function () {
+                selecionarUf("");
+                campoUf.focus();
+            });
+        }
     }
 
     /* Uma linha do ranking leva ao mesmo lugar que uma sugestão da busca. */
@@ -3835,7 +4261,7 @@ _JS_CONTROLADOR = """
         if (!el) { return; }
 
         var fonte = '<span class="legenda-fonte">' + cfg.creditoLegenda + "</span>";
-        var escopo = ufSelecionada ? (" &middot; " + ufSelecionada) : "";
+        var escopo = rotuloEscopo() ? (" &middot; " + rotuloEscopo()) : "";
 
         if (!mostraCidade()) {
             el.innerHTML = '<span class="legenda-titulo">Pontos de atendimento' +
@@ -3913,7 +4339,7 @@ _JS_CONTROLADOR = """
                 rodape.title = nota;
             }
         };
-        var escopo = ufSelecionada ? (" \u00b7 " + ufSelecionada) : "";
+        var escopo = rotuloEscopo() ? (" \u00b7 " + rotuloEscopo()) : "";
         var total = resumo.municipios || 1;
         var pctAtendidos = Math.round(resumo.atendidos * 100 / total);
         var pctVazios = Math.round(resumo.semPonto * 100 / total);
@@ -3944,7 +4370,8 @@ _JS_CONTROLADOR = """
         el.innerHTML = "";
         if (nota) {
             nota.textContent = ranking.length
-                ? ("top " + ranking.length + (ufSelecionada ? " \u00b7 " + ufSelecionada : ""))
+                ? ("top " + ranking.length +
+                   (rotuloEscopo() ? " \u00b7 " + rotuloEscopo() : ""))
                 : "";
         }
         if (!ranking.length) {
@@ -4188,12 +4615,18 @@ _JS_CONTROLADOR = """
     atualizarContagens();
 
     ligarSeletorDeModo();
-    ligarFiltroDeUf();
+    ligarFiltroDeRegiao();
     ligarAcoesDeSelecao();
 
     montarIndice();
     ligarBusca();
+    ligarListaDeUf();
     ligarRanking();
+    /* Resolve o recorte inicial (o inteiro) antes da primeira repintura: sem
+       isto, `dentroDoRecorte` consultaria um conjunto vazio e o mapa abriria
+       sem nenhum município. */
+    resolverRecorte();
+    escreverCampoUf();
     recalcular();
     aplicarModo();
 
@@ -4221,14 +4654,75 @@ _JS_CONTROLADOR = """
        A repetição no `load` é a garantia de que a medida final vale: este
        bloco roda com o documento ainda em análise, e qualquer coisa que mude a
        caixa depois (a barra de rolagem aparecendo, uma fonte trocando de
-       métrica) deixaria o mapa desalinhado até o primeiro zoom. */
+       métrica) deixaria o mapa desalinhado até o primeiro zoom.
+
+       E nem o `load` basta. Se o cartão AINDA não tiver tamanho àquela altura
+       — é o que acontece quando o arquivo abre num painel que só é
+       dimensionado depois, ou numa aba de fundo —, `fitBounds` recebe um
+       retângulo de área zero e resolve para o zoom máximo: o mapa abre em
+       zoom 20 sobre um ponto cinza, e assim fica até alguém mexer nele. Foi
+       medido abrindo este arquivo num painel embutido, e reproduz igual na
+       versão anterior a esta.
+
+       Daí a terceira tentativa: enquanto o enquadramento de abertura estiver
+       PENDENTE, um `ResizeObserver` no cartão refaz a medida a cada mudança de
+       tamanho, e só a partir de uma medida válida ela é dada por boa.
+
+       O que encerra a pendência, além de uma medida válida, é o primeiro gesto
+       do leitor sobre o mapa. Sem isso, um redimensionamento de janela no meio
+       de uma navegação puxaria a vista de volta para o recorte inteiro — e a
+       correção de um defeito de abertura viraria um defeito de uso. */
+    var enquadramentoPendente = true;
+    var observadorDoCartao = null;
+
+    function encerrarEnquadramentoInicial() {
+        enquadramentoPendente = false;
+        if (observadorDoCartao) {
+            observadorDoCartao.disconnect();
+            observadorDoCartao = null;
+        }
+    }
+
+    function cartaoMedido() {
+        var tamanho = mapa.getSize();
+        return tamanho.x > 0 && tamanho.y > 0;
+    }
+
     function remedirEEnquadrar() {
         mapa.invalidateSize();
+        /* Depois da abertura, `invalidateSize` continua obrigatório a cada
+           mudança de caixa — o que para é o reenquadramento automático. */
+        if (!enquadramentoPendente) { return; }
+        if (!cartaoMedido()) { return; }
         enquadrar();
+        encerrarEnquadramentoInicial();
     }
 
     remedirEEnquadrar();
-    window.addEventListener("load", remedirEEnquadrar);
+    ajustarDica();
+    window.addEventListener("load", function () {
+        remedirEEnquadrar();
+        ajustarDica();
+    });
+    window.addEventListener("resize", function () {
+        remedirEEnquadrar();
+        ajustarDica();
+    });
+
+    if (window.ResizeObserver) {
+        observadorDoCartao = new ResizeObserver(remedirEEnquadrar);
+        observadorDoCartao.observe(mapa.getContainer());
+    }
+
+    /* O primeiro gesto sobre o mapa encerra a pendência mesmo que o cartão
+       nunca tenha sido medido: a partir dali quem enquadra é o leitor.
+       `fitBounds` e `setView` do próprio controlador não disparam nenhum
+       destes três, então o enquadramento programático não se cancela. */
+    ["mousedown", "wheel", "touchstart"].forEach(function (gesto) {
+        mapa.getContainer().addEventListener(
+            gesto, encerrarEnquadramentoInicial, {passive: true}
+        );
+    });
 })();
 """
 
@@ -4355,6 +4849,22 @@ def adicionar_controle_reativo(
         },
         "ufs": ufs_do_recorte(agregado),
         "limites": limites_por_uf(agregado),
+        # O recorte hierárquico do mapa: as UFs do recorte, as regiões que elas
+        # formam e o caminho de volta (UF -> região), que é o que permite a
+        # lista de estados selecionar sozinha a região do estado escolhido.
+        "ufs": ufs_do_recorte(agregado),
+        "ufsPorRegiao": regioes_do_recorte(agregado),
+        "regiaoPorUf": {
+            uf: config.REGIAO_POR_UF[uf]
+            for uf in ufs_do_recorte(agregado)
+            if uf in config.REGIAO_POR_UF
+        },
+        # O nome por extenso é o que a lista mostra e o que a digitação casa:
+        # "Rio" só acha os três Rios contra o nome, nunca contra a sigla.
+        "nomeUf": {
+            uf: config.NOME_UF.get(uf, uf) for uf in ufs_do_recorte(agregado)
+        },
+        "limitesRegiao": limites_por_regiao(agregado),
         "textoBusca": TEXTO_BUSCA,
         "minBusca": MIN_CARACTERES_BUSCA,
         "maxSugestoes": MAX_SUGESTOES_BUSCA,
