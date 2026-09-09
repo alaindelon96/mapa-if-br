@@ -34,7 +34,7 @@ e-mail ou pen drive e funciona em rede corporativa que bloqueie CDN.
 A única coisa que continua vindo da rede é o **basemap** — os ladrilhos de
 ruas da CARTO, baixados sob demanda conforme o enquadramento, que por serem
 milhares não têm como ser empacotados. Sem eles o mapa perde o fundo de ruas
-e mantém todo o resto: coroplético, divisas, os 7.600 marcadores, popups,
+e mantém todo o resto: coroplético, divisas, os 7.603 marcadores, popups,
 filtros, busca e ranking.
 
 ## 2. Escopo
@@ -81,8 +81,8 @@ São três etapas, "primeira que casar vence", em `etl_bacen.classificar_sub_cat
 | 3 | **marca escrita no nome da instalação** (`NOME INSTALAÇÃO`) | `REGRAS_BANDEIRA_POR_INSTALACAO` |
 
 A etapa 3 existe porque há cooperativas filiadas a um sistema que **não escrevem
-a marca na razão social**, mas batizam cada posto com ela. Na safra 202606 são
-quatro no Sul, todas Sicoob, somando **57 pontos** — entre elas a
+a marca na razão social**, mas batizam cada posto com ela. Na safra 202608 são
+quatro no Sul, todas Sicoob, somando **58 pontos** — entre elas a
 `COOPERATIVA DE ECONOMIA E CRÉDITO MÚTUO DOS MILITARES ESTADUAIS DE SANTA
 CATARINA - CREDPOM`, cujos postos se chamam `SICOOB PA - JOINVILLE`,
 `SICOOB PA - LAGES` e assim por diante. Lendo só a razão social, o mapa exibia
@@ -94,10 +94,10 @@ campos lidos: dois em vez de um.
 
 #### `marca_exibicao`: o nome por trás de "Outra Cooperativa"
 
-Depois das três etapas sobram, na safra 202606, **99 pontos** em
-`Outra Cooperativa` — e **nenhum deles é anônimo**: os 99 pertencem a 16
+Depois das três etapas sobram, na safra 202608, **100 pontos** em
+`Outra Cooperativa` — e **nenhum deles é anônimo**: os 100 pertencem a 17
 sistemas, todos com a marca escrita (Sisprime 34, Lar Credi 18, Credi&Gente 12,
-Credisis 8, Crediseara 5, e mais onze com 1 a 4 pontos cada).
+Credisis 8, Crediseara 5, e mais doze com 1 a 4 pontos cada).
 
 O projeto trata isso separando dois papéis que estavam na mesma coluna:
 
@@ -139,8 +139,8 @@ ela mexer em qualquer bandeira reconhecida.
   planilhas do BACEN cobrem agências e postos de atendimento; nenhum outro canal
   de atendimento entra na contagem.
 
-> **Decisão registrada (safra 202606):** `ITAÚ UNIBANCO HOLDING S.A.` ficou de
-> fora. Ela tem 2 pontos próprios no Sul, ambos postos, contra 495 da entidade
+> **Decisão registrada (safra 202608):** `ITAÚ UNIBANCO HOLDING S.A.` ficou de
+> fora. Ela tem 2 pontos próprios no Sul, ambos postos, contra 493 da entidade
 > operacional `ITAÚ UNIBANCO S.A.`. O diagnóstico que embasou a decisão roda a
 > cada execução do ETL (`etl_bacen.diagnosticar_itau`), para reavaliação em
 > safras futuras.
@@ -159,12 +159,16 @@ https://www.bcb.gov.br/estabilidadefinanceira/agenciasconsorcio
 ```
 
 Dela saem os dois arquivos que devem ser salvos em `data/raw/`, posição
-**30.6.2026**:
+**31.8.2026**:
 
 | Arquivo | Conteúdo |
 |---|---|
-| `202606AGENCIAS.xlsx` | agências em funcionamento |
-| `202606POSTOS.xlsx` | postos de atendimento (PA, PAE) |
+| `202608AGENCIAS.xlsx` | agências em funcionamento |
+| `202608POSTOS.xlsx` | postos de atendimento (PA, PAE) |
+
+O BACEN publica cada um como `.zip` contendo o `.xlsx` de mesmo nome; é o
+`.xlsx` que vai para `data/raw/`. A publicação é mensal, no quinto dia útil
+do mês seguinte à data-base.
 
 Nas duas planilhas as linhas 1–9 são cabeçalho institucional; o cabeçalho real
 das colunas está na linha 10 (`config.LINHA_CABECALHO_BACEN`).
@@ -299,11 +303,11 @@ município. Rode o pipeline antes; sem os artefatos eles falham com a instruçã
 Não é uniforme, e o mapa **declara o nível ponto a ponto** no popup em vez de
 fingir exatidão. Os quatro níveis, do melhor para o pior:
 
-| Nível | O que significa | Safra 202606 |
+| Nível | O que significa | Safra 202608 |
 |---|---|---|
-| `endereco` | endereço do imóvel localizado no CNEFE — a posição é a medida no Censo 2022 | 4.475 (58,9%) |
-| `logradouro` | o logradouro foi localizado, o número não; posição aproximada dentro da rua | 2.252 (29,6%) |
-| `localidade` | logradouro não localizado; posição na área urbana do município | 691 (9,1%) |
+| `endereco` | endereço do imóvel localizado no CNEFE — a posição é a medida no Censo 2022 | 4.469 (58,8%) |
+| `logradouro` | o logradouro foi localizado, o número não; posição aproximada dentro da rua | 2.271 (29,9%) |
+| `localidade` | logradouro não localizado; posição na área urbana do município | 681 (9,0%) |
 | `municipio` | endereço não localizado no CNEFE; **o ponto é o do município, não o do estabelecimento** | 182 (2,4%) |
 
 Os pontos em nível `municipio` **não devem ser lidos como endereço**. A contagem
@@ -314,7 +318,7 @@ Três causas concentram o rebaixamento, todas na qualidade do endereço publicad
 pelo BACEN: o logradouro vem abreviado e sem separador (`PCA.TIRADENTES,410`);
 em **59%** das linhas o CEP é o CEP geral do município (terminado em `-000`), que
 não identifica logradouro; e o número do imóvel só vem em coluna própria em
-**17%** das agências (contra 88% dos postos) — nas demais ele está embutido no
+**17%** das agências (contra 89% dos postos) — nas demais ele está embutido no
 texto do endereço, de onde precisa ser extraído.
 
 Pontos que cairiam exatamente sobre a mesma coordenada são deslocados em leque
@@ -325,7 +329,7 @@ deslocada alguns metros da real.
 
 As três fontes têm datas diferentes, e o mapa as sobrepõe assim mesmo:
 
-- **BACEN — 06/2026:** é um retrato estático. Agência aberta ou fechada depois
+- **BACEN — 08/2026:** é um retrato estático. Agência aberta ou fechada depois
   dessa posição não aparece. Atualizar é trocar os dois `.xlsx`, o
   `config.DATA_DADOS` e rodar de novo;
 - **CNEFE — Censo 2022:** endereço criado depois do Censo não existe no cadastro

@@ -219,7 +219,7 @@ REGRAS_BANDEIRA_POR_INSTALACAO = REGRAS_BANDEIRA_COOPERATIVA
 #: mas que são nomeadas para o leitor em `marca_exibicao`.
 #:
 #: Decisão de escopo: "Outra Cooperativa" segue existindo como categoria de
-#: filtro e de legenda — são 16 sistemas de 1 a 34 pontos cada, e promover cada
+#: filtro e de legenda — são 17 sistemas de 1 a 34 pontos cada, e promover cada
 #: um a bandeira própria encheria o painel de linhas de 1 ponto. Mas o rótulo
 #: sozinho apagava informação que a fonte publica: nenhuma dessas linhas é
 #: anônima, todas trazem a marca escrita. Então a marca viaja em coluna própria
@@ -252,6 +252,7 @@ MARCAS_OUTRAS_COOPERATIVAS = [
     ("Coopesf", r"\bCOOPESF\b"),
     ("Coopnore", r"\bCOOPNORE\b"),
     ("Coopcrece", r"\bCOOPCRECE\b"),
+    ("Cooperalfa", r"\bCOOPERALFA\b"),
 ]
 
 
@@ -774,8 +775,8 @@ def _nomear_marca_exibicao(
     incompatíveis. Ela é a chave do FILTRO e da legenda — e por isso precisa de
     poucos valores estáveis, com "Outra Cooperativa" agrupando os sistemas
     pequenos. Mas ela também era o texto exibido, e aí "Outra Cooperativa"
-    apagava um nome que a fonte publica: as 99 linhas assim rotuladas na safra
-    202606 pertencem a 16 sistemas, todos com a marca escrita.
+    apagava um nome que a fonte publica: as 100 linhas assim rotuladas na safra
+    202608 pertencem a 17 sistemas, todos com a marca escrita.
 
     `marca_exibicao` resolve o conflito separando os papéis:
 

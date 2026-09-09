@@ -22,11 +22,11 @@ OUTPUT_DIR = BASE_DIR / "output"
 CRS_GEOGRAFICO = "EPSG:4326"
 
 # --------------------------------------------------------------------------- #
-# Arquivos brutos do BACEN (posição: 30.6.2026)
+# Arquivos brutos do BACEN (posição: 31.8.2026)
 # --------------------------------------------------------------------------- #
 
-ARQUIVO_AGENCIAS = RAW_DIR / "202606AGENCIAS.xlsx"
-ARQUIVO_POSTOS = RAW_DIR / "202606POSTOS.xlsx"
+ARQUIVO_AGENCIAS = RAW_DIR / "202608AGENCIAS.xlsx"
+ARQUIVO_POSTOS = RAW_DIR / "202608POSTOS.xlsx"
 
 #: Safra dos dados do BACEN, no formato em que ela é EXIBIDA (mês/ano).
 #:
@@ -34,7 +34,7 @@ ARQUIVO_POSTOS = RAW_DIR / "202606POSTOS.xlsx"
 #: mapa e o crédito de fontes não precisem repetir a data por conta própria:
 #: trocar de safra é trocar os dois arquivos acima e esta linha, e a página
 #: inteira acompanha. Ver `src.mapa.adicionar_moldura`.
-DATA_DADOS = "06/2026"
+DATA_DADOS = "08/2026"
 
 # Nas duas planilhas as linhas 1-9 (1-based) são cabeçalho institucional do
 # BACEN; o cabeçalho real das colunas está na linha 10, ou seja, índice 9
@@ -176,9 +176,9 @@ DIR_LIBS = RAW_DIR / "libs"
 #: "CAIXA ECONOMICA FEDERAL" NÃO leva acento em "ECONOMICA" — os valores abaixo
 #: reproduzem literalmente o que está na planilha do BACEN.
 #:
-#: DECISÃO (safra 202606): "ITAÚ UNIBANCO HOLDING S.A." fica DE FORA. Ela tem
+#: DECISÃO (safra 202608): "ITAÚ UNIBANCO HOLDING S.A." fica DE FORA. Ela tem
 #: 2 pontos próprios no Sul (2 postos de atendimento, nenhuma agência), mas não
-#: é rede de varejo; a entidade operacional é "ITAÚ UNIBANCO S.A.", com 495
+#: é rede de varejo; a entidade operacional é "ITAÚ UNIBANCO S.A.", com 493
 #: pontos. O diagnóstico que embasou a decisão continua rodando a cada execução
 #: do ETL (ver `etl_bacen.diagnosticar_itau`), para reavaliação em safras futuras.
 BANCOS_ALVO = [
