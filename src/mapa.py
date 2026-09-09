@@ -662,6 +662,25 @@ RAIO_MARCADOR = 7
 #: Espessura do contorno do marcador, em pixels.
 LARGURA_CONTORNO_MARCADOR = 1.2
 
+#: Opacidade do preenchimento do disco.
+#:
+#: Um pouco abaixo de 1 para que dois marcadores sobrepostos ainda se
+#: denunciem, sem que a cor de marca perca saturação.
+OPACIDADE_MARCADOR = 0.92
+
+#: Largura máxima do popup de um ponto, em pixels.
+#:
+#: 312 = os 300 de largura útil + os 12 do recuo da barra de rolagem que
+#: `.popup-municipio` reserva, pela mesma razão do popup do município.
+MAX_LARGURA_POPUP_PONTO = 312
+
+#: Largura máxima do popup de um município, em pixels.
+#:
+#: 352 = os 340 de largura útil + os 12 da barra de rolagem. Sem a
+#: compensação, o recuo comeria largura do conteúdo e a linha da população
+#: passaria a quebrar em duas.
+MAX_LARGURA_POPUP_MUNICIPIO = 352
+
 #: Quanto o contorno do marcador é escurecido em relação ao preenchimento.
 #:
 #: O contorno é derivado da própria cor da marca, e não fixo em branco, porque
@@ -1613,148 +1632,213 @@ def carregar_agregado(caminho: Path | None = None) -> gpd.GeoDataFrame:
 # --------------------------------------------------------------------------- #
 
 
-def _formatar_inteiro(valor) -> str:
-    """Formata um inteiro no padrão brasileiro (ponto como separador de milhar).
+#: As três funções de formatação que a página inteira usa, traduzidas do
+#: Python que as escrevia na geração.
+#:
+#: Vivem num bloco só, e não copiadas dentro de cada script que precisa delas,
+#: pelo mesmo motivo que fez a lógica de popup sair do Python: duas
+#: implementações da mesma regra divergem com o tempo. `esc` e `escRe` são o
+#: `html.escape` e o `re.escape` da biblioteca padrão do Python — as duas com o
+#: conjunto de caracteres e a ordem de substituição exatos —, e `inteiroBR` é o
+#: antigo `_formatar_inteiro`.
+#:
+#: São emitidas antes de qualquer camada, como filho do mapa, para estarem
+#: declaradas quando os demais blocos rodarem.
+_JS_FORMATO = r"""
+window.mapaFormato = (function () {
+    "use strict";
 
-    Args:
-        valor: número a formatar; ``None``/``NaN`` é tratado pelo chamador.
+    /* Mesmo conjunto e MESMA ORDEM do `html.escape` do Python (que escapa
+       aspas por padrão): inverter a ordem faria o `&` de `&amp;` ser
+       reescapado. */
+    function esc(t) {
+        return String(t)
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#x27;");
+    }
 
-    Returns:
-        A string formatada, ex.: ``"1.332.570"``.
-    """
-    return f"{int(valor):,}".replace(",", ".")
+    /* Equivalente do `re.escape`: o Python 3.7+ escapa exatamente este
+       conjunto de caracteres, e nenhum outro. */
+    function escRe(t) {
+        return String(t).replace(/[()[\]{}?*+\-|^$\\.&~# \t\n\r\v\f]/g, "\\$&");
+    }
 
+    /* Equivalente de `f"{int(v):,}".replace(",", ".")`: separador de milhar
+       brasileiro. Escrito à mão, e não com `toLocaleString`, porque o
+       resultado do `toLocaleString` depende do locale instalado no navegador
+       de quem abre o arquivo — e este arquivo circula por e-mail. */
+    function inteiroBR(valor) {
+        var n = Math.trunc(Number(valor));
+        var digitos = Math.abs(n).toString();
+        return (n < 0 ? "-" : "") +
+            digitos.replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+    }
 
-def _texto_populacao(linha: pd.Series) -> str:
-    """Devolve a população formatada, ou o aviso de dado indisponível.
-
-    O ``populacao`` do agregado é ``Int64`` (nullable): município que a API de
-    agregados do IBGE não devolveu vem como ``pd.NA`` e NÃO pode virar 0 no
-    popup — zero habitante é uma afirmação sobre o município, "indisponível" é
-    uma afirmação sobre o dado.
-
-    Args:
-        linha: uma linha do agregado.
-
-    Returns:
-        Ex.: ``"1.332.570 hab. (2025)"`` ou
-        ``"<span class='indisponivel'>dado indisponível</span>"``.
-    """
-    populacao = linha["populacao"]
-    if pd.isna(populacao):
-        return '<span class="indisponivel">dado indisponível</span>'
-
-    texto = f"{_formatar_inteiro(populacao)} hab."
-    ano = linha.get("populacao_ano")
-    if not pd.isna(ano) and str(ano).strip():
-        texto += f" ({html.escape(str(ano))})"
-    return texto
-
-
-def _linhas_por_bandeira(linha: pd.Series, categoria: str) -> str:
-    """Monta as linhas de detalhamento por `sub_categoria` de um grupo.
-
-    Só entram as bandeiras com ao menos 1 ponto no município: listar as 14 com
-    zero em quase todas transformaria o popup numa tabela de zeros, em que a
-    informação — quais bandeiras existem ali — fica escondida.
-
-    Args:
-        linha: uma linha do agregado.
-        categoria: `CATEGORIA_COOPERATIVA` ou `CATEGORIA_BANCO`.
-
-    Returns:
-        As ``<tr>`` do detalhamento, ou uma linha de "nenhum ponto" se o
-        município não tiver nada daquele grupo.
-    """
-    linhas = []
-    for sub_categoria in ORDEM_SUB_CATEGORIAS[categoria]:
-        coluna = f"total_{agregacao._sufixo_coluna(sub_categoria)}"
-        total = linha.get(coluna, 0)
-        if pd.isna(total) or int(total) == 0:
-            continue
-        linhas.append(
-            f'<tr class="bandeira"><th>{html.escape(sub_categoria)}</th>'
-            f"<td>{_formatar_inteiro(total)}</td></tr>"
-        )
-        # "Outra Cooperativa" é a única bandeira que agrupa marcas distintas.
-        # Sem esta linha o popup afirmaria que há N pontos de algo sem nome,
-        # quando a fonte publica o nome de todos eles.
-        if sub_categoria == agregacao.SUB_CATEGORIA_COOP_INDEFINIDA:
-            detalhe = str(linha.get(agregacao.COLUNA_DETALHE_OUTRAS, "") or "").strip()
-            if detalhe:
-                linhas.append(
-                    '<tr class="detalhe-outras"><td colspan="2">'
-                    f"{html.escape(detalhe)}</td></tr>"
-                )
-
-    if not linhas:
-        return '<tr class="bandeira"><th>—</th><td>nenhum ponto</td></tr>'
-    return "".join(linhas)
+    return {esc: esc, escRe: escRe, inteiroBR: inteiroBR};
+})();
+"""
 
 
-def preparar_textos_municipio(agregado: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
-    """Acrescenta ao agregado as colunas de HTML do popup e do tooltip.
+#: O popup e o tooltip do município, montados no navegador a partir das
+#: contagens que a feição já carregava.
+#:
+#: Ver `preparar_propriedades_municipio` para o que saiu do arquivo. A ligação
+#: é feita na CAMADA, e não feição a feição: o `bindPopup` de um `L.GeoJSON`
+#: aceita uma função e a chama com a feição clicada, que é como o próprio
+#: `folium.GeoJsonPopup` funciona por dentro. Os dois envelopes
+#: (``<table><tr><td>``) e as duas classes (``foliumpopup``, ``foliumtooltip``)
+#: são os que o folium escrevia, reproduzidos porque o CSS da página mira
+#: exatamente essa estrutura.
+_JS_MUNICIPIO = r"""
+(function () {
+    "use strict";
+    var cfg = __CONFIG__;
+    var geo = __GEOJSON__;
+    var f = window.mapaFormato;
+    if (!geo || !f) {
+        console.error("municípios: camada ou formatador não encontrados");
+        return;
+    }
 
-    O HTML é montado aqui, em Python, e não no template JavaScript do folium:
-    `GeoJsonPopup` só sabe despejar o valor bruto de um campo numa célula de
-    tabela, e o popup pedido tem estrutura (seções, detalhamento por bandeira,
-    aviso de dado indisponível). Como o folium insere o valor com ``innerHTML``,
-    a marcação escrita aqui é renderizada como HTML — daí o `html.escape` em
-    todo texto vindo do dado.
+    /* Tradução de `_texto_populacao`. Município que a API de agregados do IBGE
+       não devolveu NÃO pode virar 0 no popup: zero habitante é uma afirmação
+       sobre o município, "indisponível" é uma afirmação sobre o dado. */
+    function textoPopulacao(props) {
+        if (props.populacao_valor == null) {
+            return '<span class="indisponivel">dado indisponível</span>';
+        }
+        var texto = f.inteiroBR(props.populacao_valor) + " hab.";
+        var ano = props.populacao_ano;
+        if (ano != null && String(ano).trim()) {
+            texto += " (" + f.esc(String(ano)) + ")";
+        }
+        return texto;
+    }
+
+    /* Tradução de `_linhas_por_bandeira`. Só entram as bandeiras com ao menos
+       1 ponto no município: listar as 14 com zero em quase todas transformaria
+       o popup numa tabela de zeros, em que a informação — quais bandeiras
+       existem ali — fica escondida. */
+    function linhasPorBandeira(props, secao) {
+        var linhas = [];
+        secao.bandeiras.forEach(function (bandeira) {
+            var rotulo = bandeira[0];
+            var total = props[bandeira[1]];
+            if (total == null || !Math.trunc(total)) { return; }
+            linhas.push('<tr class="bandeira"><th>' + f.esc(rotulo) +
+                "</th><td>" + f.inteiroBR(total) + "</td></tr>");
+            /* "Outra Cooperativa" é a única bandeira que agrupa marcas
+               distintas. Sem esta linha o popup afirmaria que há N pontos de
+               algo sem nome, quando a fonte publica o nome de todos eles. */
+            if (rotulo === cfg.subIndefinida) {
+                var detalhe = String(props[cfg.colunaDetalhe] || "").trim();
+                if (detalhe) {
+                    linhas.push('<tr class="detalhe-outras"><td colspan="2">' +
+                        f.esc(detalhe) + "</td></tr>");
+                }
+            }
+        });
+        if (!linhas.length) {
+            return '<tr class="bandeira"><th>—</th><td>nenhum ponto</td></tr>';
+        }
+        return linhas.join("");
+    }
+
+    function popupMunicipio(camada) {
+        var props = camada.feature.properties;
+        var corpo = '<div class="popup-municipio">' +
+            "<h4>" + f.esc(props.municipio_nome) + "/" + f.esc(props.uf) + "</h4>" +
+            "<table>" +
+            "<tr><th>População</th><td>" + textoPopulacao(props) + "</td></tr>";
+        cfg.secoes.forEach(function (secao) {
+            corpo += '<tr class="secao"><th>' + f.esc(secao.rotulo) + "</th>" +
+                "<td>" + f.inteiroBR(props[secao.coluna]) + "</td></tr>" +
+                linhasPorBandeira(props, secao);
+        });
+        return envelope(corpo + "</table></div>");
+    }
+
+    function tooltipMunicipio(camada) {
+        var props = camada.feature.properties;
+        return envelope(
+            "<b>" + f.esc(props.municipio_nome) + "/" + f.esc(props.uf) + "</b><br>" +
+            "Cooperativas: " + f.inteiroBR(props.total_cooperativas) +
+            " &nbsp;|&nbsp; Bancos: " + f.inteiroBR(props.total_bancos) +
+            '<br><span class="popup-secundario">clique para o detalhamento' +
+            "</span>"
+        );
+    }
+
+    /* O envelope que o `GeoJsonPopup`/`GeoJsonTooltip` do folium montava: um
+       `<div>` criado por script, com o conteúdo dentro de uma tabela de uma
+       célula. A tabela não é decorativa — `.leaflet-popup-content table td` e
+       `.leaflet-tooltip table td` são regras da folha de estilo da página. */
+    function envelope(html) {
+        var div = L.DomUtil.create("div");
+        div.innerHTML = "<table><tr>\n            <td>" + html +
+            "</td>\n        </tr></table>";
+        return div;
+    }
+
+    geo.bindTooltip(tooltipMunicipio, {sticky: true, className: "foliumtooltip"});
+    geo.bindPopup(popupMunicipio, {
+        maxWidth: cfg.maxLarguraPopup,
+        className: "foliumpopup"
+    });
+})();
+"""
+
+
+def preparar_propriedades_municipio(agregado: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+    """Acrescenta ao agregado os campos crus que o popup do município consome.
+
+    Esta função JÁ MONTOU o HTML do popup e do tooltip, em Python, e não monta
+    mais: as contagens por bandeira sempre viajaram nas propriedades da feição
+    — é delas que o coroplético reativo soma a seleção do painel —, então o
+    HTML pré-renderizado era uma segunda cópia dos mesmos números, em prosa.
+    Custava 1,19 MB de ``popup_html`` e 0,25 MB de ``tooltip_html`` para 1.191
+    municípios, dos quais o leitor abre alguns. Quem monta o texto agora é
+    `_JS_MUNICIPIO`, no clique e no hover.
+
+    O que sobra aqui são os três campos que as contagens não continham:
+
+    * `populacao_valor` — a população como NÚMERO, porque o indicador de lacuna
+      a soma. A conversão para `int`/`None` na mão, em vez de deixar o `Int64`
+      seguir para o GeoJSON, é o que garante ``null`` no arquivo: o valor
+      ausente do pandas serializa como `NaN`, que não é JSON válido e faria
+      `JSON.parse` falhar em qualquer ferramenta que não seja o navegador;
+    * `populacao_ano` — o ano da estimativa, que aparece entre parênteses;
+    * `outras_coops_detalhe` — a composição de "Outra Cooperativa", que não é
+      derivável das contagens: ela nomeia marcas que o filtro agrupa.
 
     Args:
         agregado: saída de `carregar_agregado`.
 
     Returns:
-        Uma CÓPIA do agregado com as colunas ``popup_html``, ``tooltip_html`` e
-        ``populacao_valor``.
+        Uma CÓPIA do agregado com as três colunas acima normalizadas.
     """
-    com_textos = agregado.copy()
+    com_campos = agregado.copy()
 
-    # A população precisa chegar ao navegador como NÚMERO (o indicador de
-    # lacuna a soma), e não como o texto já formatado do popup.
-    #
-    # A conversão para `int`/`None` na mão, em vez de deixar o `Int64` seguir
-    # para o GeoJSON, é o que garante `null` no arquivo: o valor ausente do
-    # pandas serializa como `NaN`, que não é JSON válido e faria `JSON.parse`
-    # falhar na leitura do arquivo por qualquer ferramenta que não seja o
-    # próprio navegador.
-    com_textos["populacao_valor"] = [
+    com_campos["populacao_valor"] = [
         None if pd.isna(valor) else int(valor)
-        for valor in com_textos["populacao"]
+        for valor in com_campos["populacao"]
+    ]
+    com_campos["populacao_ano"] = [
+        None if pd.isna(valor) or not str(valor).strip() else str(valor)
+        for valor in com_campos["populacao_ano"]
     ]
 
-    def _popup(linha: pd.Series) -> str:
-        nome = html.escape(str(linha["municipio_nome"]))
-        uf = html.escape(str(linha["uf"]))
-        return (
-            '<div class="popup-municipio">'
-            f"<h4>{nome}/{uf}</h4>"
-            "<table>"
-            f"<tr><th>População</th><td>{_texto_populacao(linha)}</td></tr>"
-            '<tr class="secao"><th>Bancos (5 grandes)</th>'
-            f"<td>{_formatar_inteiro(linha['total_bancos'])}</td></tr>"
-            f"{_linhas_por_bandeira(linha, CATEGORIA_BANCO)}"
-            '<tr class="secao"><th>Pontos de cooperativas</th>'
-            f"<td>{_formatar_inteiro(linha['total_cooperativas'])}</td></tr>"
-            f"{_linhas_por_bandeira(linha, CATEGORIA_COOPERATIVA)}"
-            "</table></div>"
-        )
+    detalhe = com_campos.get(agregacao.COLUNA_DETALHE_OUTRAS)
+    com_campos[agregacao.COLUNA_DETALHE_OUTRAS] = (
+        [""] * len(com_campos)
+        if detalhe is None
+        else ["" if pd.isna(v) else str(v) for v in detalhe]
+    )
 
-    def _tooltip(linha: pd.Series) -> str:
-        nome = html.escape(str(linha["municipio_nome"]))
-        uf = html.escape(str(linha["uf"]))
-        return (
-            f"<b>{nome}/{uf}</b><br>"
-            f"Cooperativas: {_formatar_inteiro(linha['total_cooperativas'])}"
-            f" &nbsp;|&nbsp; Bancos: {_formatar_inteiro(linha['total_bancos'])}"
-            '<br><span class="popup-secundario">clique para o detalhamento'
-            "</span>"
-        )
-
-    com_textos["popup_html"] = com_textos.apply(_popup, axis=1)
-    com_textos["tooltip_html"] = com_textos.apply(_tooltip, axis=1)
-    return com_textos
+    return com_campos
 
 
 # --------------------------------------------------------------------------- #
@@ -1826,7 +1910,7 @@ def adicionar_coropletico(
 
     Args:
         mapa: mapa base.
-        agregado: saída de `preparar_textos_municipio`.
+        agregado: saída de `preparar_propriedades_municipio`.
 
     Returns:
         A camada adicionada.
@@ -1848,12 +1932,16 @@ def adicionar_coropletico(
         # carregar uma segunda tabela UF -> região no HTML.
         "regiao",
         "populacao_valor",
+        # O ano da estimativa e a composição de "Outra Cooperativa" são os dois
+        # campos do popup que as contagens não carregam. Somados, custam ~30 KB
+        # nas 1.191 feições — contra os 1,44 MB do popup e do tooltip que este
+        # mesmo arquivo trazia prontos até a etapa anterior.
+        "populacao_ano",
+        agregacao.COLUNA_DETALHE_OUTRAS,
         "total_geral",
         "total_bancos",
         "total_cooperativas",
         *_colunas_por_bandeira(),
-        "popup_html",
-        "tooltip_html",
         "geometry",
     ]
 
@@ -1875,15 +1963,60 @@ def adicionar_coropletico(
             "weight": 2.4,
             "color": COR_PETROLEO_ESCURO,
         },
-        tooltip=folium.GeoJsonTooltip(fields=["tooltip_html"], labels=False, sticky=True),
-        # 352 = os 340 de largura útil + os 12 que `.popup-municipio` reserva
-        # para a barra de rolagem. Sem a compensação, o recuo comeria largura do
-        # conteúdo e a linha da população passaria a quebrar em duas.
-        popup=folium.GeoJsonPopup(fields=["popup_html"], labels=False, max_width=352),
+        # Sem `popup=` nem `tooltip=`: os dois são ligados pelo controlador,
+        # com uma FUNÇÃO no lugar do campo pré-renderizado — ver `_JS_MUNICIPIO`.
+        # O `GeoJsonPopup` do folium só sabe despejar o valor bruto de um campo
+        # numa célula de tabela, e o que se quer aqui é montar o texto na hora,
+        # a partir das contagens que a feição já carrega.
         smooth_factor=0.5,
     )
     camada.add_to(mapa)
+
+    # O texto do popup e do tooltip é montado no navegador, a partir destas
+    # mesmas propriedades. O script vai como filho do mapa logo depois da
+    # camada, porque referencia a variável que o folium acabou de declarar
+    # para ela.
+    configuracao = {
+        "secoes": [
+            {
+                "rotulo": "Bancos (5 grandes)",
+                "coluna": "total_bancos",
+                "bandeiras": _bandeiras_da_categoria(CATEGORIA_BANCO),
+            },
+            {
+                "rotulo": "Pontos de cooperativas",
+                "coluna": "total_cooperativas",
+                "bandeiras": _bandeiras_da_categoria(CATEGORIA_COOPERATIVA),
+            },
+        ],
+        "subIndefinida": agregacao.SUB_CATEGORIA_COOP_INDEFINIDA,
+        "colunaDetalhe": agregacao.COLUNA_DETALHE_OUTRAS,
+        "maxLarguraPopup": MAX_LARGURA_POPUP_MUNICIPIO,
+    }
+    mapa.add_child(
+        _ScriptDoMapa(
+            _JS_MUNICIPIO.replace(
+                "__CONFIG__", json.dumps(configuracao, ensure_ascii=False)
+            ).replace("__GEOJSON__", camada.get_name()),
+            nome="TextosDoMunicipio",
+        )
+    )
     return camada
+
+
+def _bandeiras_da_categoria(categoria: str) -> list[list[str]]:
+    """Pares ``[bandeira, coluna do agregado]`` de uma categoria, na ordem do painel.
+
+    Args:
+        categoria: `CATEGORIA_COOPERATIVA` ou `CATEGORIA_BANCO`.
+
+    Returns:
+        Ex.: ``[["Sicredi", "total_sicredi"], ...]``.
+    """
+    return [
+        [sub, f"total_{agregacao._sufixo_coluna(sub)}"]
+        for sub in ORDEM_SUB_CATEGORIAS[categoria]
+    ]
 
 
 def dissolver_divisas_uf(agregado: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
@@ -2234,6 +2367,7 @@ def carregar_pontos_geocodificados(caminho: Path | None = None) -> pd.DataFrame:
         FileNotFoundError: se o arquivo não existir — rode `python -m src.cnefe`.
         KeyError: se faltar alguma coluna exigida pelo mapa.
     """
+    caminho = caminho or config.arquivo_pontos_geocodificados()
     if not caminho.exists():
         raise FileNotFoundError(
             f"Pontos geocodificados não encontrados: {caminho}. "
@@ -2280,158 +2414,420 @@ def carregar_pontos_geocodificados(caminho: Path | None = None) -> pd.DataFrame:
 # --------------------------------------------------------------------------- #
 
 
-def _texto_endereco(linha: pd.Series) -> str:
-    """Monta a linha de endereço do popup, com número e bairro quando houver.
+#: Casas decimais com que a coordenada de cada ponto viaja no HTML.
+#:
+#: Sete casas são ~1,1 cm de latitude. É bem mais fino do que o mapa consegue
+#: mostrar (no zoom 20, o máximo que o basemap serve, um pixel vale ~13 cm) e
+#: bem mais grosso do que o leque que separa pontos coincidentes, que trabalha
+#: em metros (`cnefe.RAIO_DESEMPATE_M`). O que ele economiza é real: a
+#: coordenada vem de um float32 do CNEFE alargado para float64, e o `repr` do
+#: float64 escreve 18 dígitos — ``-25.42959976196289`` —, dos quais os últimos
+#: dez são artefato da conversão, não medida do Censo.
+CASAS_COORDENADA = 7
+
+#: Colunas do ponto que viajam como TABELA de valores distintos + um índice por
+#: ponto, em vez do valor repetido linha a linha.
+#:
+#: São as de baixa cardinalidade: os 7.603 pontos do Sul têm 2 tipos de
+#: instalação, 4 níveis de precisão, 14 bandeiras, 228 instituições e 1.157
+#: municípios. Escrever "COOPERATIVA DE CRÉDITO, POUPANÇA E INVESTIMENTO DO
+#: NORTE E NORDESTE DE SANTA CATARINA - SICREDI NORTE SC" 200 vezes é o tipo de
+#: repetição que o gzip disfarça no arquivo baixado e o `JSON.parse` do
+#: navegador não.
+COLUNAS_TABELADAS = (
+    "nome_instituicao",
+    "marca_exibicao",
+    "tipo_instalacao",
+    "municipio",
+    "uf",
+    "precisao",
+    "bairro",
+    "cep",
+    "numero",
+)
+
+#: Colunas que viajam como texto solto, uma string por ponto.
+#:
+#: São as duas de cardinalidade quase máxima — 7.226 nomes de instalação e
+#: 5.686 endereços em 7.603 pontos. Tabelar não economizaria nada: a tabela
+#: teria quase o tamanho da coluna, mais o vetor de índices por cima.
+COLUNAS_LIVRES = ("nome_instalacao", "endereco")
+
+#: Nome curto de cada coluna dentro do payload. Ele aparece uma vez só no
+#: arquivo, mas mantém o JSON legível para quem for depurá-lo no navegador.
+_APELIDO_COLUNA = {
+    "nome_instituicao": "inst",
+    "marca_exibicao": "marca",
+    "tipo_instalacao": "tipo",
+    "municipio": "mun",
+    "uf": "uf",
+    "precisao": "prec",
+    "bairro": "bairro",
+    "cep": "cep",
+    "numero": "num",
+    "nome_instalacao": "nome",
+    "endereco": "end",
+}
+
+
+def _texto_da_celula(valor) -> str:
+    """Normaliza uma célula do Parquet no texto que o navegador vai receber.
+
+    Nulo do pandas vira string vazia, e não ``"nan"`` ou ``"<NA>"``: é a string
+    vazia que as funções JavaScript testam para decidir se o campo existe, do
+    mesmo modo que as versões em Python testavam com `pd.isna`.
 
     Args:
-        linha: uma linha de `carregar_pontos_geocodificados`.
+        valor: a célula, de qualquer dtype.
 
     Returns:
-        O endereço em uma linha, ex.: ``"R.URUGUAI,185 — CENTRO, 90010-901"``.
+        O texto.
     """
-    endereco = str(linha["endereco"])
-    partes = [html.escape(endereco)]
-
-    numero = linha.get("numero")
-    # O número só é acrescentado quando NÃO está embutido no endereço: a fonte
-    # grava "PCA.TIRADENTES,410" numas linhas e o número em coluna própria em
-    # outras, e repeti-lo produziria "PCA.TIRADENTES,410, 410".
-    #
-    # O número já está à vista quando aparece DEPOIS DE UMA VÍRGULA
-    # ("PCA.TIRADENTES,410", "AVENIDA DA VINDIMA, NUM 303") ou NO FIM do
-    # endereço ("AV BENTO GONCALVES 1157") — as duas formas que a fonte usa
-    # para embutir o número no texto do logradouro.
-    #
-    # As duas posições são exigidas por motivos opostos. Só a vírgula deixava
-    # passar "AV BENTO GONCALVES 1157" e rendia "1157, 1157" no popup. Já
-    # procurar o número em QUALQUER posição erra para o outro lado: o "15" de
-    # "RUA 15 DE NOVEMBRO" esconderia o número 15 de um imóvel dessa mesma rua.
-    # (Nenhum dos dois casos aparece na safra 202606 — o primeiro ocorria uma
-    # vez antes desta correção, o segundo nenhuma.)
-    if not pd.isna(numero) and str(numero).strip():
-        procurado = re.escape(str(numero).strip())
-        ja_visivel = re.search(rf",[^,]*\b{procurado}\b|\b{procurado}\b\s*$", endereco)
-        if not ja_visivel:
-            partes.append(f", {html.escape(str(numero).strip())}")
-
-    complemento = []
-    bairro = linha.get("bairro")
-    if not pd.isna(bairro) and str(bairro).strip():
-        complemento.append(html.escape(str(bairro)))
-    cep = linha.get("cep")
-    if not pd.isna(cep) and str(cep).strip():
-        complemento.append(html.escape(str(cep)))
-    if complemento:
-        partes.append(" — " + ", ".join(complemento))
-
-    return "".join(partes)
+    return "" if pd.isna(valor) else str(valor)
 
 
-def _popup_ponto(linha: pd.Series) -> str:
-    """Monta o HTML do popup de um ponto de atendimento.
+def _tabelar(valores: list[str]) -> tuple[list[str], list[int]]:
+    """Troca uma coluna de textos por (tabela de distintos, índices).
 
-    O nível de precisão é parte fixa do popup, e não um detalhe de rodapé: os
-    pontos deste mapa NÃO têm todos a mesma precisão — a maioria está no imóvel
-    ou na rua, uma minoria só no município —, e quem clica precisa saber em qual
-    caso está sem ter de conhecer a implementação. Ver `src.cnefe`.
+    A tabela sai na ordem de PRIMEIRA APARIÇÃO, e não ordenada: assim os
+    valores mais frequentes tendem a receber os índices menores, que são os
+    mais curtos de escrever, e a saída continua determinística — que é o que
+    permite comparar dois HTML gerados do mesmo dado.
 
     Args:
-        linha: uma linha de `carregar_pontos_geocodificados`.
+        valores: a coluna, já normalizada por `_texto_da_celula`.
 
     Returns:
-        O HTML do popup.
+        ``(tabela, indices)``, com ``tabela[indices[i]] == valores[i]``.
     """
-    nome = html.escape(str(linha["nome_instalacao"]))
-    instituicao = html.escape(str(linha["nome_instituicao"]))
-    marca = html.escape(_marca_do_ponto(linha))
-    sub_categoria = html.escape(str(linha["sub_categoria"]))
-    tipo = html.escape(str(linha["tipo_instalacao"]))
-    municipio = html.escape(str(linha["municipio"]))
-    uf = html.escape(str(linha["uf"]))
-
-    # Quando a marca exibida não é a bandeira, o ponto está pintado com a cor de
-    # "Outra Cooperativa" e é por esse nome que ele aparece no filtro. Dizer
-    # isso evita a contradição de um marcador rotulado "Sisprime" que some ao
-    # desmarcar uma camada chamada outra coisa.
-    filtro = (
-        ""
-        if marca == sub_categoria
-        else f'<div class="popup-secundario">no filtro: {sub_categoria}</div>'
-    )
-
-    precisao = str(linha.get("precisao", cnefe.PRECISAO_MUNICIPIO))
-    descricao = cnefe.DESCRICAO_PRECISAO.get(precisao, precisao)
-    # Só os dois níveis frouxos ganham destaque de aviso; nos dois precisos a
-    # informação é apenas a procedência da coordenada.
-    classe = (
-        "aviso-posicao"
-        if precisao in (cnefe.PRECISAO_LOCALIDADE, cnefe.PRECISAO_MUNICIPIO)
-        else "procedencia"
-    )
-
-    return (
-        '<div class="popup-municipio">'
-        f"<h4>{nome}</h4>"
-        f"<div><b>{marca}</b> &middot; {tipo}</div>"
-        f"{filtro}"
-        f'<div class="popup-secundario">{instituicao}</div>'
-        f"<div style='padding-top:5px'>{_texto_endereco(linha)}<br>{municipio}/{uf}</div>"
-        f'<div class="{classe}" style="padding-top:6px">'
-        f"Posição: {html.escape(descricao)}.</div>"
-        "</div>"
-    )
+    tabela: list[str] = []
+    posicao: dict[str, int] = {}
+    indices: list[int] = []
+    for valor in valores:
+        indice = posicao.get(valor)
+        if indice is None:
+            indice = len(tabela)
+            posicao[valor] = indice
+            tabela.append(valor)
+        indices.append(indice)
+    return tabela, indices
 
 
-def _marca_do_ponto(linha: pd.Series) -> str:
-    """Devolve o nome de marca a exibir para um ponto.
+def _dados_dos_pontos(ordenados: pd.DataFrame) -> dict:
+    """Monta o payload compacto dos pontos, no formato que o JavaScript lê.
 
-    Prefere `marca_exibicao`, que nomeia as cooperativas agrupadas sob "Outra
-    Cooperativa" (ver `etl_bacen._nomear_marca_exibicao`), e cai em
-    `sub_categoria` quando a coluna não existe — o que acontece com um Parquet
-    gerado antes de a coluna passar a existir.
+    O formato é de ARRAYS PARALELOS, um por campo, e não uma lista de objetos:
+    um objeto por ponto repetiria os nomes das chaves 30 mil vezes, que é
+    exatamente o custo que esta etapa existe para eliminar. Cada campo aparece
+    de uma das três formas:
+
+    * `lat` / `lon` — números, arredondados a `CASAS_COORDENADA`;
+    * as colunas de `COLUNAS_TABELADAS` — uma tabela de valores distintos em
+      ``tab`` e um vetor de índices em ``col``;
+    * as colunas de `COLUNAS_LIVRES` — o texto solto, em ``livre``.
+
+    A ORDEM das linhas é a ordem de criação dos marcadores no navegador, e é a
+    mesma em que `adicionar_camadas_de_pontos` percorre grupos e bandeiras: é
+    isso que permite a cada subgrupo receber uma FAIXA ``[ini, fim)`` do vetor,
+    em vez de uma coluna dizendo, ponto a ponto, a que bandeira ele pertence.
 
     Args:
-        linha: uma linha de `carregar_pontos_geocodificados`.
+        ordenados: os pontos já concatenados na ordem de emissão.
 
     Returns:
-        O nome comercial, ou a bandeira quando não há marca própria.
+        O dicionário que vira JSON no HTML.
     """
-    marca = linha.get("marca_exibicao")
-    if marca is None or pd.isna(marca) or not str(marca).strip():
-        return str(linha["sub_categoria"])
-    return str(marca)
+    dados: dict = {
+        "n": len(ordenados),
+        "lat": [round(float(v), CASAS_COORDENADA) for v in ordenados["latitude"]],
+        "lon": [round(float(v), CASAS_COORDENADA) for v in ordenados["longitude"]],
+        "tab": {},
+        "col": {},
+        "livre": {},
+        # O disco e o contorno são os mesmos de sempre, mas agora quem os
+        # aplica é o laço JavaScript, então eles precisam atravessar.
+        "raio": RAIO_MARCADOR,
+        "larguraContorno": LARGURA_CONTORNO_MARCADOR,
+        "opacidadePreenchimento": OPACIDADE_MARCADOR,
+        "maxLarguraPopup": MAX_LARGURA_POPUP_PONTO,
+        # A tabela de precisão é de `src.cnefe` e atravessa em vez de ser
+        # reescrita aqui: duas cópias da mesma tabela divergem com o tempo.
+        "precisao": {
+            "descricao": dict(cnefe.DESCRICAO_PRECISAO),
+            "aviso": [cnefe.PRECISAO_LOCALIDADE, cnefe.PRECISAO_MUNICIPIO],
+        },
+    }
+
+    for coluna in COLUNAS_TABELADAS:
+        tabela, indices = _tabelar(
+            [_texto_da_celula(v) for v in ordenados[coluna]]
+        )
+        dados["tab"][_APELIDO_COLUNA[coluna]] = tabela
+        dados["col"][_APELIDO_COLUNA[coluna]] = indices
+
+    for coluna in COLUNAS_LIVRES:
+        dados["livre"][_APELIDO_COLUNA[coluna]] = [
+            _texto_da_celula(v) for v in ordenados[coluna]
+        ]
+
+    return dados
 
 
-def _tooltip_ponto(linha: pd.Series) -> str:
-    """Monta o identificador que aparece ao passar o mouse sobre um ponto.
+#: O laço que constrói os marcadores no navegador, e as funções de popup e de
+#: tooltip que antes eram Python.
+#:
+#: As quatro funções de texto — `enderecoDoPonto`, `marcaDoPonto`,
+#: `popupDoPonto` e `tooltipDoPonto` — são a tradução literal das que viviam
+#: neste módulo (`_texto_endereco`, `_marca_do_ponto`, `_popup_ponto`,
+#: `_tooltip_ponto`), APAGADAS na mesma mudança. Duas implementações da mesma
+#: regra divergem com o tempo, e a regra aqui não é cosmética: ela decide
+#: quando o número do imóvel já está visível no texto do logradouro, qual nome
+#: comercial aparece no lugar de "Outra Cooperativa" e qual dos dois
+#: tratamentos o nível de precisão recebe.
+#:
+#: Elas rodam no CLIQUE e no HOVER, e não na geração: o `bindPopup` do Leaflet
+#: aceita uma FUNÇÃO no lugar do conteúdo e só a chama quando o balão abre
+#: (`DivOverlay._updateContent`). Era isso que custava ~4 MB no arquivo do Sul —
+#: HTML de popup e de tooltip pré-renderizado para 7.603 pontos, dos quais o
+#: leitor abre alguns.
+_JS_PONTOS = r"""
+var mapaPontos = __DADOS__;
 
-    Curto de propósito: o tooltip segue o cursor e some, então ele responde só
-    "o que é este ponto" — marca e nome da instalação. O resto está no popup,
-    a um clique.
+(function () {
+    "use strict";
+    var d = mapaPontos;
+    /* `esc` e `escRe` são o `html.escape` e o `re.escape` do Python, definidos
+       uma vez só em `_JS_FORMATO` — ver o comentário lá sobre por que não são
+       copiados aqui. */
+    var esc = window.mapaFormato.esc;
+    var escRe = window.mapaFormato.escRe;
 
-    A marca vem de `marca_exibicao`, e não de `sub_categoria`: para as 99 linhas
-    que o filtro agrupa em "Outra Cooperativa", aquele rótulo apagava um nome
-    que a fonte publica. Quando os dois diferem, a bandeira do filtro aparece
-    entre parênteses, para que o rótulo do tooltip case com o da legenda.
+    /* Valor tabelado (`d.tab`) e texto solto (`d.livre`) — ver
+       `_dados_dos_pontos`. */
+    function v(coluna, i) { return d.tab[coluna][d.col[coluna][i]]; }
+    function livre(coluna, i) { return d.livre[coluna][i]; }
 
-    Args:
-        linha: uma linha de `carregar_pontos_geocodificados`.
+    /* Tradução de `_marca_do_ponto`. Prefere a `marca_exibicao`, que nomeia as
+       cooperativas agrupadas sob "Outra Cooperativa", e cai na bandeira quando
+       o campo vem vazio. */
+    function marcaDoPonto(i, sub) {
+        var marca = v("marca", i);
+        return (marca && marca.trim()) ? marca : sub;
+    }
 
-    Returns:
-        O HTML do tooltip.
+    /* Tradução de `_texto_endereco`.
+
+       O número só é acrescentado quando NÃO está embutido no endereço: a fonte
+       grava "PCA.TIRADENTES,410" numas linhas e o número em coluna própria em
+       outras, e repeti-lo produziria "PCA.TIRADENTES,410, 410".
+
+       O número já está à vista quando aparece DEPOIS DE UMA VÍRGULA
+       ("PCA.TIRADENTES,410", "AVENIDA DA VINDIMA, NUM 303") ou NO FIM do
+       endereço ("AV BENTO GONCALVES 1157") — as duas formas que a fonte usa
+       para embutir o número no texto do logradouro.
+
+       As duas posições são exigidas por motivos opostos. Só a vírgula deixava
+       passar "AV BENTO GONCALVES 1157" e rendia "1157, 1157" no popup. Já
+       procurar o número em QUALQUER posição erra para o outro lado: o "15" de
+       "RUA 15 DE NOVEMBRO" esconderia o número 15 de um imóvel dessa mesma rua.
+
+       O bairro e o CEP entram SEM `trim`, como no original: o `trim` decide se
+       o campo existe, não o que é exibido. */
+    function enderecoDoPonto(i) {
+        var endereco = livre("end", i);
+        var partes = [esc(endereco)];
+
+        var numero = v("num", i);
+        if (numero && numero.trim()) {
+            var procurado = escRe(numero.trim());
+            var padrao = new RegExp(
+                ",[^,]*\\b" + procurado + "\\b|\\b" + procurado + "\\b\\s*$"
+            );
+            if (!padrao.test(endereco)) {
+                partes.push(", " + esc(numero.trim()));
+            }
+        }
+
+        var complemento = [];
+        var bairro = v("bairro", i);
+        if (bairro && bairro.trim()) { complemento.push(esc(bairro)); }
+        var cep = v("cep", i);
+        if (cep && cep.trim()) { complemento.push(esc(cep)); }
+        if (complemento.length) {
+            partes.push(" — " + complemento.join(", "));
+        }
+
+        return partes.join("");
+    }
+
+    /* Tradução de `_popup_ponto`.
+
+       O nível de precisão é parte fixa do popup, e não um detalhe de rodapé:
+       os pontos deste mapa NÃO têm todos a mesma precisão — a maioria está no
+       imóvel ou na rua, uma minoria só no município —, e quem clica precisa
+       saber em qual caso está sem ter de conhecer a implementação. */
+    function popupDoPonto(i, sub) {
+        var nome = esc(livre("nome", i));
+        var instituicao = esc(v("inst", i));
+        var marca = esc(marcaDoPonto(i, sub));
+        var subCategoria = esc(sub);
+        var tipo = esc(v("tipo", i));
+        var municipio = esc(v("mun", i));
+        var uf = esc(v("uf", i));
+
+        /* Quando a marca exibida não é a bandeira, o ponto está pintado com a
+           cor de "Outra Cooperativa" e é por esse nome que ele aparece no
+           filtro. Dizer isso evita a contradição de um marcador rotulado
+           "Sisprime" que some ao desmarcar uma camada chamada outra coisa. */
+        var filtro = (marca === subCategoria) ? "" :
+            '<div class="popup-secundario">no filtro: ' + subCategoria + "</div>";
+
+        var precisao = v("prec", i);
+        var descricao = d.precisao.descricao[precisao];
+        if (descricao === undefined) { descricao = precisao; }
+        /* Só os dois níveis frouxos ganham destaque de aviso; nos dois
+           precisos a informação é apenas a procedência da coordenada. */
+        var classe = d.precisao.aviso.indexOf(precisao) >= 0
+            ? "aviso-posicao" : "procedencia";
+
+        return '<div class="popup-municipio">' +
+            "<h4>" + nome + "</h4>" +
+            "<div><b>" + marca + "</b> &middot; " + tipo + "</div>" +
+            filtro +
+            '<div class="popup-secundario">' + instituicao + "</div>" +
+            "<div style='padding-top:5px'>" + enderecoDoPonto(i) +
+            "<br>" + municipio + "/" + uf + "</div>" +
+            '<div class="' + classe + '" style="padding-top:6px">' +
+            "Posição: " + esc(descricao) + ".</div>" +
+            "</div>";
+    }
+
+    /* Tradução de `_tooltip_ponto`. Curto de propósito: o tooltip segue o
+       cursor e some, então responde só "o que é este ponto" — marca e nome da
+       instalação. O resto está no popup, a um clique.
+
+       A comparação marca/bandeira é feita aqui nos textos CRUS e no popup nos
+       já escapados. As duas versões em Python faziam exatamente assim, e o
+       resultado só poderia divergir para um nome de bandeira que contivesse
+       `&`, `<`, `>` ou aspas. */
+    function tooltipDoPonto(i, sub) {
+        var marca = marcaDoPonto(i, sub);
+        var sufixo = (marca === sub) ? "" :
+            ' <span class="popup-secundario">(' + esc(sub) + ")</span>";
+        return "<b>" + esc(marca) + "</b>" + sufixo + " &middot; " +
+            esc(v("tipo", i)) + "<br>" + esc(livre("nome", i));
+    }
+
+    /* Os dois envelopes que o folium punha em volta do conteúdo. Reproduzidos
+       porque o CSS da página mira o que está dentro deles: o `<div>` do
+       tooltip e o `<div>` de dimensão cheia do popup. O `id` que o folium
+       sorteava para o div do popup não é reproduzido — nada, nem CSS nem
+       JavaScript, olhava para ele. */
+    function envelopePopup(html) {
+        return '<div style="width: 100.0%; height: 100.0%;">' + html + "</div>";
+    }
+    function envelopeTooltip(html) {
+        return "<div>" + html + "</div>";
+    }
+
+    /* Constrói os marcadores de UMA bandeira e os entrega ao subgrupo dela.
+
+       Chamada uma vez por subgrupo, com a faixa `[ini, fim)` daquela bandeira
+       no vetor de pontos. É deliberado que ela rode ANTES de
+       `subgrupo.addTo(mapa)`: com o subgrupo ainda fora do mapa, `addLayer` só
+       guarda o marcador em `_layers`, e o cluster recebe os milhares de uma
+       vez, no lote que o `Leaflet.FeatureGroup.SubGroup` dispara ao ser
+       adicionado. Era esse o caminho que o HTML gerado pelo folium seguia;
+       chamá-la depois faria o agrupamento se reorganizar uma vez por ponto.
+
+       As opções do disco são compartilhadas por UF dentro da bandeira — o
+       único campo que varia entre marcadores é `tags`. Compartilhar é seguro
+       porque o `L.Util.setOptions` do Leaflet COPIA o objeto recebido para um
+       novo, em vez de guardá-lo. */
+    window.mapaPontosCriar = function (subgrupo, ini, fim, sub, cor, contorno) {
+        var opcoesPorUf = {};
+
+        function conteudoPopup(camada) {
+            return envelopePopup(popupDoPonto(camada.__ponto, sub));
+        }
+        function conteudoTooltip(camada) {
+            return envelopeTooltip(tooltipDoPonto(camada.__ponto, sub));
+        }
+
+        for (var i = ini; i < fim; i++) {
+            var uf = v("uf", i);
+            var opcoes = opcoesPorUf[uf];
+            if (!opcoes) {
+                opcoes = opcoesPorUf[uf] = {
+                    bubblingMouseEvents: true,
+                    color: contorno,
+                    dashArray: null,
+                    dashOffset: null,
+                    fill: true,
+                    fillColor: cor,
+                    fillOpacity: d.opacidadePreenchimento,
+                    fillRule: "evenodd",
+                    lineCap: "round",
+                    lineJoin: "round",
+                    opacity: 1.0,
+                    radius: d.raio,
+                    stroke: true,
+                    /* A UF viaja com o marcador porque é por ela que o filtro
+                       de estado escolhe quem fica no mapa. Continua em `tags`,
+                       o mesmo campo de antes, que é onde o controlador a
+                       procura (`m.options.tags`). */
+                    tags: [uf],
+                    weight: d.larguraContorno
+                };
+            }
+            var marcador = L.circleMarker([d.lat[i], d.lon[i]], opcoes);
+            /* O índice do ponto, e não os textos dele: é com o índice que as
+               funções de popup e de tooltip acham a linha na hora da
+               interação. */
+            marcador.__ponto = i;
+            subgrupo.addLayer(marcador);
+            marcador.bindPopup(conteudoPopup, {maxWidth: d.maxLarguraPopup});
+            marcador.bindTooltip(conteudoTooltip, {sticky: true});
+        }
+    };
+})();
+"""
+
+
+class _ScriptDoMapa(MacroElement):
+    """Envelope que emite um bloco de JavaScript cru na ordem de inserção.
+
+    Existe por uma questão de ORDEM. Os scripts deste módulo referenciam as
+    variáveis JavaScript que o folium cria para o mapa e para cada camada
+    (``map_ab12...``, ``feature_group_sub_group_cd34...``), e portanto têm de
+    aparecer depois delas no arquivo. Adicionar o script direto em
+    ``get_root().script`` não serve: os filhos diretos daquela seção são
+    escritos ANTES de todos os blocos que o folium gera durante a renderização,
+    e o script acabava no topo, referenciando variáveis ainda não declaradas —
+    falhando com "mapa ou camada não encontrados".
+
+    Como `MacroElement` filho de outro elemento, o bloco entra na ordem de
+    inserção daquele elemento. São dois usos, e a diferença entre eles importa:
+
+    * filho do MAPA, adicionado por último — sai por último, depois de todas as
+      camadas. É o caso do controlador reativo;
+    * filho de um SUBGRUPO — sai dentro da janela em que aquele subgrupo já
+      existe e ainda não foi adicionado ao mapa, que é de onde o laço de
+      construção dos marcadores depende para entregar os pontos ao cluster em
+      lote (ver `_JS_PONTOS`).
+
+    Attributes:
+        js: o JavaScript a emitir, já com os nomes das variáveis substituídos.
     """
-    marca = _marca_do_ponto(linha)
-    sub_categoria = str(linha["sub_categoria"])
-    sufixo = (
-        ""
-        if marca == sub_categoria
-        else f' <span class="popup-secundario">({html.escape(sub_categoria)})</span>'
+
+    _template = Template(
+        "{% macro script(this, kwargs) %}{{ this.js | safe }}{% endmacro %}"
     )
-    return (
-        f"<b>{html.escape(marca)}</b>{sufixo} &middot; "
-        f'{html.escape(str(linha["tipo_instalacao"]))}<br>'
-        f'{html.escape(str(linha["nome_instalacao"]))}'
-    )
+
+    def __init__(self, js: str, nome: str = "ScriptDoMapa"):
+        super().__init__()
+        self._name = nome
+        self.js = js
 
 
 def _escurecer(cor: str, fracao: float = ESCURECIMENTO_CONTORNO) -> str:
@@ -2517,6 +2913,14 @@ def adicionar_camadas_de_pontos(
     pontos de Sicredi e Sicoob vizinhos entrarem no MESMO balão de contagem, em
     vez de virarem dois balões sobrepostos no mesmo pixel.
 
+    Os MARCADORES, porém, não são emitidos aqui um a um. O que vai para o HTML
+    é o vetor compacto de `_dados_dos_pontos` mais uma chamada por bandeira ao
+    laço de `_JS_PONTOS`, que constrói os discos no navegador. A troca é de
+    representação, não de comportamento: o marcador que o laço monta tem as
+    mesmas opções, entra no mesmo subgrupo, na mesma ordem, e responde ao
+    clique e ao hover com o mesmo texto — que agora é montado na hora, em vez
+    de vir pronto no arquivo.
+
     Args:
         mapa: mapa base.
         localizados: saída de `carregar_pontos_geocodificados`.
@@ -2527,23 +2931,75 @@ def adicionar_camadas_de_pontos(
         O controlador reativo precisa dos OBJETOS, não só dos nomes: é por eles
         que o JavaScript identifica qual camada o usuário marcou.
     """
-    estrutura: list[dict] = []
-
+    # As faixas são montadas ANTES de qualquer camada existir, porque o vetor
+    # de pontos precisa ir para o HTML na mesma ordem em que os marcadores
+    # serão criados — é o que permite a cada bandeira receber um `[ini, fim)`
+    # em vez de uma coluna de bandeira por ponto. Ver `_dados_dos_pontos`.
+    faixas: list[dict] = []
+    partes: list[pd.DataFrame] = []
+    inicio = 0
     for categoria, rotulo_grupo in ROTULO_GRUPO.items():
         do_grupo = localizados[localizados["categoria_if"] == categoria]
         if do_grupo.empty:
             _LOGGER.warning("Nenhum ponto na categoria %r; grupo omitido.", categoria)
             continue
 
-        sub_categorias = _ordenar_sub_categorias(
+        subs: list[dict] = []
+        for sub_categoria in _ordenar_sub_categorias(
             set(do_grupo["sub_categoria"].dropna().unique()), categoria
+        ):
+            da_bandeira = do_grupo[do_grupo["sub_categoria"] == sub_categoria]
+            partes.append(da_bandeira)
+            subs.append(
+                {
+                    "rotulo": sub_categoria,
+                    "cor": cor_do_marcador(sub_categoria, categoria),
+                    "ini": inicio,
+                    "fim": inicio + len(da_bandeira),
+                    "pontos": len(da_bandeira),
+                }
+            )
+            inicio += len(da_bandeira)
+
+        faixas.append(
+            {
+                "categoria": categoria,
+                "rotulo": rotulo_grupo,
+                "pontos": len(do_grupo),
+                "subs": subs,
+            }
         )
 
+    ordenados = (
+        pd.concat(partes, ignore_index=True)
+        if partes
+        else localizados.iloc[0:0]
+    )
+
+    # O payload e as funções de texto vão como filhos do MAPA, e antes dos
+    # clusters, porque o laço de cada bandeira os chama: filhos do mapa saem na
+    # ordem de inserção, então este bloco precede todos os subgrupos.
+    mapa.add_child(
+        _ScriptDoMapa(
+            _JS_PONTOS.replace(
+                "__DADOS__",
+                json.dumps(
+                    _dados_dos_pontos(ordenados),
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                ),
+            ),
+            nome="DadosDosPontos",
+        )
+    )
+
+    estrutura: list[dict] = []
+    for faixa in faixas:
         # --- Nível 1: o grupo pai ------------------------------------------ #
         grupo_pai = MarkerCluster(
             name=(
-                f'<span class="camada-grupo">{html.escape(rotulo_grupo)}</span>'
-                f'<span class="camada-contagem"> ({len(do_grupo)})</span>'
+                f'<span class="camada-grupo">{html.escape(faixa["rotulo"])}</span>'
+                f'<span class="camada-contagem"> ({faixa["pontos"]})</span>'
             ),
             options=OPCOES_CLUSTER,
             control=True,
@@ -2553,9 +3009,8 @@ def adicionar_camadas_de_pontos(
 
         # --- Nível 2: um subgrupo por bandeira ----------------------------- #
         subgrupos_do_grupo: list[dict] = []
-        for sub_categoria in sub_categorias:
-            da_bandeira = do_grupo[do_grupo["sub_categoria"] == sub_categoria]
-            cor = cor_do_marcador(sub_categoria, categoria)
+        for sub in faixa["subs"]:
+            cor = sub["cor"]
             contorno = _escurecer(cor)
             subgrupo = FeatureGroupSubGroup(
                 grupo_pai,
@@ -2565,60 +3020,55 @@ def adicionar_camadas_de_pontos(
                 name=(
                     f'<span class="camada-cor" style="background:{cor};'
                     f'border-color:{contorno}"></span>'
-                    f'<span class="camada-sub">{html.escape(sub_categoria)}</span>'
-                    f'<span class="camada-contagem"> ({len(da_bandeira)})</span>'
+                    f'<span class="camada-sub">{html.escape(sub["rotulo"])}</span>'
+                    f'<span class="camada-contagem"> ({sub["pontos"]})</span>'
                 ),
                 control=True,
                 show=True,
             )
             subgrupo.add_to(mapa)
 
-            for _, ponto in da_bandeira.iterrows():
-                folium.CircleMarker(
-                    location=(ponto["latitude"], ponto["longitude"]),
-                    radius=RAIO_MARCADOR,
-                    color=contorno,
-                    weight=LARGURA_CONTORNO_MARCADOR,
-                    fill=True,
-                    fill_color=cor,
-                    fill_opacity=0.92,
-                    # A UF viaja com o marcador porque é por ela que o filtro
-                    # de estado escolhe quem fica no mapa, no navegador. Vai em
-                    # `tags` — e não numa chave inventada — porque o folium
-                    # monta as opções do marcador com `path_options`, que só
-                    # repassa as chaves que conhece: qualquer outro nome seria
-                    # descartado em silêncio, e o filtro não teria por onde
-                    # separar os pontos.
-                    tags=[str(ponto["uf"])],
-                    # 312 = os 300 de largura útil + os 12 do recuo da barra,
-                    # pela mesma razão do popup do município.
-                    popup=folium.Popup(_popup_ponto(ponto), max_width=312),
-                    tooltip=folium.Tooltip(_tooltip_ponto(ponto), sticky=True),
-                ).add_to(subgrupo)
+            # Filho do SUBGRUPO, e não do mapa: é o que coloca a chamada na
+            # janela entre a criação do subgrupo e o `addTo(mapa)` dele, que é
+            # onde os marcadores têm de entrar para chegarem ao cluster em um
+            # lote só. Ver `_ScriptDoMapa` e `_JS_PONTOS`.
+            subgrupo.add_child(
+                _ScriptDoMapa(
+                    "mapaPontosCriar({camada},{ini},{fim},{sub},{cor},{contorno});".format(
+                        camada=subgrupo.get_name(),
+                        ini=sub["ini"],
+                        fim=sub["fim"],
+                        sub=json.dumps(sub["rotulo"], ensure_ascii=False),
+                        cor=json.dumps(cor),
+                        contorno=json.dumps(contorno),
+                    ),
+                    nome=f'MarcadoresDe{sub["ini"]}',
+                )
+            )
 
             subgrupos_do_grupo.append(
                 {
-                    "rotulo": sub_categoria,
+                    "rotulo": sub["rotulo"],
                     "camada": subgrupo,
-                    "coluna": f"total_{agregacao._sufixo_coluna(sub_categoria)}",
-                    "pontos": len(da_bandeira),
+                    "coluna": f'total_{agregacao._sufixo_coluna(sub["rotulo"])}',
+                    "pontos": sub["pontos"],
                 }
             )
 
         estrutura.append(
             {
-                "categoria": categoria,
-                "rotulo": rotulo_grupo,
+                "categoria": faixa["categoria"],
+                "rotulo": faixa["rotulo"],
                 "camada": grupo_pai,
-                "pontos": len(do_grupo),
+                "pontos": faixa["pontos"],
                 "subs": subgrupos_do_grupo,
             }
         )
         _LOGGER.info(
             "Grupo %r: %d pontos em %d subgrupos.",
-            rotulo_grupo,
-            len(do_grupo),
-            len(sub_categorias),
+            faixa["rotulo"],
+            faixa["pontos"],
+            len(subgrupos_do_grupo),
         )
 
     return estrutura
@@ -2676,6 +3126,10 @@ def criar_mapa_base(
         max_native_zoom=config.ZOOM_MAXIMO_TILES,
         control=False,
     ).add_to(mapa)
+
+    # As funções de formatação vêm antes de qualquer camada: os scripts das
+    # camadas as chamam, e filhos do mapa saem na ordem de inserção.
+    mapa.add_child(_ScriptDoMapa(_JS_FORMATO, nome="Formatadores"))
 
     # Os panes vêm antes de qualquer camada — ver `PANE_COROPLETICO`.
     CustomPane(
@@ -3782,7 +4236,7 @@ _JS_CONTROLADOR = """
 class _FolhaDeEstilo(MacroElement):
     """Envelope que emite a folha de estilo no FIM do ``<head>``.
 
-    Existe pelo mesmo motivo que `_ControladorReativo`, um andar acima: por
+    Existe pelo mesmo motivo que `_ScriptDoMapa`, um andar acima: por
     causa da ORDEM. O folium carrega, sem ser perguntado, o Bootstrap, o
     FontAwesome, o leaflet.css e o MarkerCluster.Default.css — e várias regras
     deles colidem com as daqui: o Bootstrap redefine a fonte do ``<body>``, o
@@ -3819,32 +4273,6 @@ def aplicar_folha_de_estilo(mapa: folium.Map) -> None:
     mapa.add_child(_FolhaDeEstilo(_CSS_PAGINA))
 
 
-class _ControladorReativo(MacroElement):
-    """Envelope que emite `_JS_CONTROLADOR` no lugar certo do HTML.
-
-    Existe por uma questão de ORDEM. O controlador referencia as variáveis
-    JavaScript que o folium cria para o mapa e para cada camada
-    (``map_ab12...``, ``feature_group_sub_group_cd34...``), e portanto tem de
-    aparecer depois delas no arquivo. Adicionar o script direto em
-    ``get_root().script`` não serve: os filhos diretos daquela seção são
-    escritos ANTES de todos os blocos que o folium gera durante a renderização,
-    e o controlador acabava no topo, referenciando variáveis ainda não
-    declaradas — falhando com "mapa ou camada não encontrados".
-
-    Como `MacroElement` filho do mapa, o bloco entra na ordem de inserção,
-    junto com as camadas. Adicionado por último, sai por último.
-    """
-
-    _template = Template(
-        "{% macro script(this, kwargs) %}{{ this.js | safe }}{% endmacro %}"
-    )
-
-    def __init__(self, js: str):
-        super().__init__()
-        self._name = "ControladorReativo"
-        self.js = js
-
-
 def adicionar_controle_reativo(
     mapa: folium.Map,
     coropletico: folium.GeoJson,
@@ -3856,7 +4284,7 @@ def adicionar_controle_reativo(
     """Injeta o controlador do painel: cascata dos toggles e coroplético reativo.
 
     Ver "Coroplético reativo" no cabeçalho do módulo para o porquê de a cor ser
-    decidida no cliente e não em Python, e `_ControladorReativo` para o porquê
+    decidida no cliente e não em Python, e `_ScriptDoMapa` para o porquê
     de o script precisar ser o último elemento adicionado ao mapa.
 
     Args:
@@ -3945,7 +4373,7 @@ def adicionar_controle_reativo(
         .replace("__DIVISAS__", divisas.get_name())
         .replace("__CONTROLE__", controle.get_name())
     )
-    mapa.add_child(_ControladorReativo(script))
+    mapa.add_child(_ScriptDoMapa(script, nome="ControladorReativo"))
 
 
 def adicionar_controle_de_camadas(mapa: folium.Map) -> folium.LayerControl:
@@ -4022,7 +4450,7 @@ def gera_mapa(
     centro, zoom = enquadramento_inicial(agregado)
     mapa = criar_mapa_base(centro, zoom)
 
-    com_textos = preparar_textos_municipio(agregado)
+    com_textos = preparar_propriedades_municipio(agregado)
     coropletico = adicionar_coropletico(mapa, com_textos)
     divisas = adicionar_divisas_uf(mapa, agregado)
     adicionar_moldura(mapa, agregado)
