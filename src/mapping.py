@@ -9,10 +9,24 @@ from src import config
 def criar_mapa(
     centro: tuple[float, float] = config.CENTRO_MAPA,
     zoom: int = config.ZOOM_INICIAL,
-    tiles: str = config.TILES_PADRAO,
+    tiles: str = config.URL_TILES_PADRAO,
+    atribuicao: str = config.ATRIBUICAO_TILES,
 ) -> folium.Map:
-    """Cria o mapa base, sem camadas de dados."""
-    return folium.Map(location=list(centro), zoom_start=zoom, tiles=tiles)
+    """Cria o mapa base, sem camadas de dados.
+
+    `tiles` é a URL crua dos ladrilhos, e não um alias do folium, porque é nela
+    que mora a chave de API da CARTO (ver `config.URL_TILES_PADRAO`). Como o
+    folium só embute atribuição nos aliases que conhece, ela vem junto em
+    `atribuicao` — sem isso o construtor recusa a URL.
+    """
+    return folium.Map(
+        location=list(centro),
+        zoom_start=zoom,
+        tiles=tiles,
+        attr=atribuicao,
+        subdomains=config.SUBDOMINIOS_TILES,
+        max_zoom=config.ZOOM_MAXIMO_TILES,
+    )
 
 
 def adicionar_marcadores(

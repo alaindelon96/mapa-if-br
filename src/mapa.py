@@ -2618,7 +2618,21 @@ def criar_mapa_base() -> folium.Map:
     # de rádio permanentemente marcado, com o alias interno do folium por
     # rótulo ("cartodbpositron"), que não oferece escolha nenhuma. Sem camada
     # base no painel, o Leaflet omite a seção e o separador dela.
-    folium.TileLayer(config.TILES_PADRAO, control=False).add_to(mapa)
+    #
+    # A URL é montada em `config` em vez de vir do alias "CartoDB positron" do
+    # folium porque o alias não tem onde encaixar a chave de API que a CARTO
+    # passou a exigir — ver `config.CARTO_API_KEY`. Passando a URL crua, o
+    # folium também deixa de fornecer a atribuição embutida no alias, então ela
+    # vem explícita em `attr=`, e mantê-la no mapa é condição do uso gratuito.
+    folium.TileLayer(
+        tiles=config.URL_TILES_PADRAO,
+        attr=config.ATRIBUICAO_TILES,
+        name=config.TILES_PADRAO,
+        subdomains=config.SUBDOMINIOS_TILES,
+        max_zoom=config.ZOOM_MAXIMO_TILES,
+        max_native_zoom=config.ZOOM_MAXIMO_TILES,
+        control=False,
+    ).add_to(mapa)
 
     # Os panes vêm antes de qualquer camada — ver `PANE_COROPLETICO`.
     CustomPane(
@@ -4007,7 +4021,16 @@ def imprimir_resumo(
     print("MAPA — output/mapa_if_sul.html")
     print("=" * 78)
     print(f"Centro {config.CENTRO_MAPA}, zoom {config.ZOOM_INICIAL}, "
-          f"base {config.TILES_PADRAO!r}\n")
+          f"base {config.TILES_PADRAO!r}")
+    # Sem chave a CARTO não devolve erro: devolve o ladrilho com a marca
+    # d'água "API KEY REQUIRED" impressa por cima. Como o mapa sai "pronto" de
+    # qualquer jeito, o aviso precisa estar aqui, ou a ausência da chave só
+    # aparece depois de publicado.
+    if config.CARTO_API_KEY:
+        print(f"Chave CARTO: ...{config.CARTO_API_KEY[-6:]} (sem marca d'água)\n")
+    else:
+        print("ATENÇÃO: sem chave da CARTO — o basemap sairá com marca "
+              "d'água. Ver config.CARTO_API_KEY.\n")
 
     valores = agregado[COLUNA_COROPLETICO]
     print(

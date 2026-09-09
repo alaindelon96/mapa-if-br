@@ -37,6 +37,15 @@ milhares não têm como ser empacotados. Sem eles o mapa perde o fundo de ruas
 e mantém todo o resto: coroplético, divisas, os 7.603 marcadores, popups,
 filtros, busca e ranking.
 
+Esses ladrilhos exigem uma **chave de API da CARTO** — gratuita, pedida em
+<https://carto.com/basemaps/apikey>, com franquia de 5 milhões de ladrilhos por
+mês. Ela fica em `config.CARTO_API_KEY` e entra na URL como `?key=`. Sem chave
+o servidor não devolve erro: devolve o ladrilho com a marca d'água
+"API KEY REQUIRED" carimbada por cima, e o mapa sai publicado assim. Para gerar
+com outra chave, sem editar o arquivo, basta exportar `CARTO_API_KEY` antes de
+rodar. A atribuição do OpenStreetMap e da CARTO no canto do mapa é condição do
+uso gratuito e não deve ser removida.
+
 ## 2. Escopo
 
 O recorte é **deliberadamente fechado** e não é uma amostra do sistema

@@ -4,6 +4,7 @@ Centraliza caminhos de diretórios e as regras de recorte do dataset
 (estados-alvo, instituições-alvo e segmento de cooperativas).
 """
 
+import os
 from pathlib import Path
 
 # --------------------------------------------------------------------------- #
@@ -142,13 +143,60 @@ CENTRO_MAPA = (-28.13, -52.84)
 #: abriria com RS e PR cortados. Daí 6, e não 7.
 ZOOM_INICIAL = 6
 
-#: Camada base padrão.
+#: Nome da camada base, para log e para o rótulo interno da camada.
 #:
 #: Positron é um basemap claro e de baixo contraste, escolhido porque o mapa
 #: principal é coroplético: com o OpenStreetMap padrão, o colorido das ruas e do
-#: uso do solo compete com a escala de cores dos municípios. Aceita qualquer
-#: alias reconhecido pelo folium (ex.: "OpenStreetMap", "CartoDB dark_matter").
+#: uso do solo compete com a escala de cores dos municípios.
 TILES_PADRAO = "CartoDB positron"
+
+#: Chave de API dos basemaps da CARTO.
+#:
+#: A CARTO passou a exigir chave nos ladrilhos raster: sem ela o servidor
+#: devolve a tile com a marca d'água "API KEY REQUIRED" carimbada por cima
+#: (não é erro HTTP — a tile vem 200, só que suja). A chave é gratuita, pedida
+#: em https://carto.com/basemaps/apikey, e cobre 5 milhões de tiles por mês.
+#:
+#: Ela vive no código porque é uma chave de *cliente*: o mapa é um HTML
+#: estático servido no GitHub Pages, e a URL do ladrilho — chave inclusa — é
+#: necessariamente visível para quem abrir a página. Não há como escondê-la
+#: sem um proxy próprio. Ainda assim o valor pode ser trocado pela variável de
+#: ambiente CARTO_API_KEY, para gerar uma versão do mapa com outra chave sem
+#: editar o arquivo. Definir a variável como vazia derruba o parâmetro e o
+#: mapa volta a sair com marca d'água.
+CARTO_API_KEY = os.environ.get(
+    "CARTO_API_KEY", "cb1_3455_1_404241543fec4488f0ff11c8"
+)
+
+#: Template da URL dos ladrilhos, no formato que o Leaflet interpola.
+#:
+#: `{s}` é o subdomínio (ver SUBDOMINIOS_TILES), `{z}/{x}/{y}` o endereço do
+#: ladrilho e `{r}` o sufixo de tela retina ("@2x" ou vazio) — todos resolvidos
+#: pelo Leaflet no navegador, e por isso escritos literalmente, sem f-string.
+#: O parâmetro é `key=`, NÃO `api_key=`: o CDN ignora nomes desconhecidos em
+#: silêncio, devolvendo a tile carimbada com HTTP 200, então errar o nome do
+#: parâmetro não dá erro nenhum — só não tira a marca d'água.
+URL_TILES_PADRAO = (
+    "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
+    + (f"?key={CARTO_API_KEY}" if CARTO_API_KEY else "")
+)
+
+#: Subdomínios do CDN da CARTO. São quatro (a-d), e não os três do padrão do
+#: folium, o que dá ao navegador mais conexões paralelas para os ladrilhos.
+SUBDOMINIOS_TILES = "abcd"
+
+#: Zoom máximo servido pelo basemap raster da CARTO.
+ZOOM_MAXIMO_TILES = 20
+
+#: Crédito exibido no canto do mapa.
+#:
+#: Manter OpenStreetMap e CARTO visíveis é condição do uso gratuito dos
+#: basemaps — é o que a CARTO pede em troca da chave. Não remover.
+ATRIBUICAO_TILES = (
+    '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap'
+    '</a> contributors &copy; <a href="https://carto.com/attributions">CARTO'
+    "</a>"
+)
 
 #: Destino do mapa interativo gerado por `src.mapa`.
 ARQUIVO_MAPA = OUTPUT_DIR / "mapa_if_sul.html"
