@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mapa da Presença Física das Cooperativas e Bancos — Brasil</title>
+<meta name="description" content="Mapa interativo da cobertura de cooperativas de crédito e dos cinco maiores bancos nos 5.570 municípios do Brasil. Dados do BACEN (08/2026) e do IBGE.">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 250 250'><circle cx='125' cy='125' r='102' fill='none' stroke='%2314b8a6' stroke-width='26'/><polygon points='125,40 68,182 182,182' fill='%2314b8a6'/><rect x='104' y='170' width='42' height='46' fill='%2314b8a6'/></svg>">
+
+<!-- Esta página vive na branch órfã `gh-pages`, junto dos mapas — a `main`
+     guarda só o código. O caminho `output/` é preservado porque é o que o
+     pipeline gera e o que as URLs já publicadas apontam.
+
+     O mapa NÃO é copiado para cá: uma página de 2 KB que redireciona custa
+     menos que duplicar 20 MB a cada safra.
+
+     O redirecionamento é por <meta refresh>, e não por JavaScript, para
+     funcionar com script desligado; o link abaixo é a saída manual caso o
+     próprio refresh esteja bloqueado. -->
+<meta http-equiv="refresh" content="0; url=output/mapa_if_br.html">
+<link rel="canonical" href="https://alaindelon96.github.io/mapa-if-sul/output/mapa_if_br.html">
+
+<style>
+  :root {
+    --turquesa: #14b8a6;
+    --petroleo: #0b4a5a;
+    --papel: #f1f6f6;
+    --tinta: #0e2a33;
+    --tinta-suave: #5d757e;
+    --fonte: Helvetica, "Helvetica Neue", Arial, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    background: var(--papel);
+    color: var(--tinta);
+    font-family: var(--fonte);
+    line-height: 1.5;
+  }
+  .cartao {
+    max-width: 30rem;
+    text-align: center;
+    background: #fff;
+    border: 1px solid #dbe6e8;
+    border-radius: 14px;
+    padding: 40px 32px;
+  }
+  .simbolo { width: 56px; height: 56px; color: var(--turquesa); }
+  h1 {
+    font-size: 1.25rem;
+    line-height: 1.35;
+    margin: 18px 0 6px;
+    color: var(--petroleo);
+  }
+  .linha-fina { margin: 0 0 26px; color: var(--tinta-suave); font-size: .9rem; }
+  .estado { font-size: .95rem; margin: 0 0 4px; }
+  .nota { font-size: .8rem; color: var(--tinta-suave); margin: 0 0 22px; }
+  a.botao {
+    display: inline-block;
+    padding: 11px 22px;
+    border-radius: 8px;
+    background: var(--petroleo);
+    color: #fff;
+    text-decoration: none;
+    font-weight: bold;
+    font-size: .9rem;
+  }
+  a.botao:hover, a.botao:focus { background: var(--turquesa); }
+  .pontos::after {
+    content: "";
+    animation: reticencias 1.4s steps(4, end) infinite;
+  }
+  @keyframes reticencias {
+    0%   { content: ""; }
+    25%  { content: "."; }
+    50%  { content: ".."; }
+    75%  { content: "..."; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .pontos::after { content: "..."; animation: none; }
+  }
+</style>
+</head>
+<body>
+  <main class="cartao">
+    <svg class="simbolo" viewBox="0 0 250 250" aria-hidden="true">
+      <circle cx="125" cy="125" r="102" fill="none" stroke="currentColor" stroke-width="26"/>
+      <polygon points="125,40 68,182 182,182" fill="currentColor"/>
+      <rect x="104" y="170" width="42" height="46" fill="currentColor"/>
+    </svg>
+
+    <h1>Mapa da Presença Física das Cooperativas e Bancos</h1>
+    <p class="linha-fina">Brasil &middot; 27 UFs &middot; dados do BACEN de 08/2026</p>
+
+    <p class="estado"><span class="pontos">Abrindo o mapa</span></p>
+    <p class="nota">
+      São 30.578 pontos de atendimento em um arquivo de ~20 MB;
+      a primeira abertura pode levar alguns segundos.
+    </p>
+
+    <a class="botao" href="output/mapa_if_br.html">Abrir o mapa agora</a>
+
+    <p class="nota" style="margin:18px 0 0">
+      Recorte anterior:
+      <a href="output/mapa_if_sul.html">só a Região Sul</a> (~4 MB).
+    </p>
+  </main>
+</body>
+</html>
