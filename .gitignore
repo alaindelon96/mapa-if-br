@@ -34,14 +34,20 @@ htmlcov/
 data/raw/*
 !data/raw/.gitkeep
 
-# O mapa NÃO entra aqui de propósito: ele é o artefato publicado no GitHub
-# Pages, e o site serve o arquivo versionado. O custo é conhecido e foi medido:
-# o folium sorteia os identificadores dos elementos a cada execução, então duas
-# gerações do MESMO dado diferem em ~106 mil trechos e o git não consegue
-# guardar só o delta — cada versão commitada soma ~1,1 MB permanentes ao
-# histórico. Em ritmo de safra do BACEN isso é irrelevante; se algum dia o mapa
-# passar a ser regerado com frequência, migrar para uma branch gh-pages órfã
-# resolve sem reescrever o histórico da main.
+# O mapa GERADO fica fora da `main`. Ele é o artefato publicado no GitHub
+# Pages, e vive na branch órfã `gh-pages`, junto do `index.html` que redireciona
+# para ele.
+#
+# O custo que motivou a separação foi medido: o folium sorteia os
+# identificadores dos elementos a cada execução, então duas gerações do MESMO
+# dado diferem em ~106 mil trechos e o git não consegue guardar só o delta —
+# cada versão commitada soma o arquivo INTEIRO ao histórico, para sempre. Eram
+# ~1,1 MB por safra com o mapa do Sul; com o nacional, ~5 MB. Numa branch órfã
+# o custo continua existindo, mas fica isolado do histórico do código: clonar o
+# repositório para trabalhar nele não arrasta mais nenhum mapa.
+#
+# Publicar uma safra nova é substituir o HTML na `gh-pages`; a `main` não muda.
+output/*.html
 
 # Jupyter
 .ipynb_checkpoints/

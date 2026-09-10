@@ -1,7 +1,9 @@
 """Testes de fumaça: garantem que o esqueleto carrega e que os caminhos batem."""
 
+import geopandas as gpd
 import pandas as pd
 import pytest
+from shapely.geometry import Polygon
 
 from src import cnefe, config, export, geo, ingest, mapping, normalize, pipeline
 
@@ -89,6 +91,48 @@ def test_chave_logradouro_nao_confunde_logradouros_distintos():
         "RUA SAO PAULO"
     )
     assert cnefe.chave_logradouro("") == ""
+
+
+def test_ponto_sem_codigo_ibge_nao_derruba_o_posicionamento():
+    """Um ponto sem `municipio_ibge` sai do mapa, e o resto segue.
+
+    O caso é real e só aparece fora do Sul: na safra 202608 o BACEN publica um
+    Itaú cujo município vem escrito "GOIANA/GO" — Goiana é em PE —, e o de-para
+    nome->código não resolve. O ponto não tem como ser posicionado e é
+    descartado, o que já era o comportamento pretendido.
+
+    O que este teste cobre é o CAMINHO DO AVISO, não o descarte. A mensagem
+    listava os códigos afetados com `sorted(...unique())`, e `pd.NA` não é
+    ordenável: comparar levantava "boolean value of NA is ambiguous" e derrubava
+    a etapa inteira — no fim de uma varredura de 40 minutos do CNEFE nacional,
+    depois de todo o trabalho caro estar feito e antes de ele ser gravado.
+
+    Um ponto sem código no meio de 30 mil não deve custar a execução inteira.
+    """
+    malha = gpd.GeoDataFrame(
+        {"municipio_ibge": pd.Series(["4314902"], dtype="str")},
+        geometry=[Polygon([(-51.5, -30.2), (-51.0, -30.2),
+                           (-51.0, -29.9), (-51.5, -29.9)])],
+        crs=config.CRS_GEOGRAFICO,
+    )
+    pontos = pd.DataFrame(
+        {
+            # o do meio não tem código; o último tem um que não existe na malha
+            "municipio_ibge": pd.Series(["4314902", None, "9999999"], dtype="str"),
+            "latitude": [-30.03, float("nan"), float("nan")],
+            "longitude": [-51.23, float("nan"), float("nan")],
+            "precisao": pd.Series([cnefe.PRECISAO_ENDERECO, "", ""], dtype="str"),
+        }
+    )
+
+    resultado = cnefe.posicionar_no_municipio(pontos, malha)
+
+    assert len(resultado) == 1, (
+        "só o ponto com município na malha deveria sobreviver; sobraram "
+        f"{len(resultado)}."
+    )
+    assert resultado["municipio_ibge"].tolist() == ["4314902"]
+    assert int(resultado[["latitude", "longitude"]].isna().sum().sum()) == 0
 
 
 def test_caminhos_apontam_para_o_projeto():

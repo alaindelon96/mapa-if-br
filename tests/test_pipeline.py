@@ -152,6 +152,52 @@ def test_sub_categoria_banco_so_tem_os_cinco_alvos(pontos):
     )
 
 
+#: Fração máxima do dataset que pode ficar de fora do agregado sem que isso
+#: seja tratado como defeito.
+#:
+#: Um ponto entra no agregado pelo `municipio_ibge`, e fica de fora em dois
+#: casos — os dois REAIS, os dois reportados no log da agregação, e nenhum dos
+#: dois presente no recorte do Sul:
+#:
+#: * o código não foi resolvido a partir do nome publicado pelo BACEN. Na safra
+#:   202608 é 1 ponto, um Itaú cujo município vem escrito "GOIANA/GO" — Goiana
+#:   é em Pernambuco;
+#: * o código existe e a malha do IBGE não o tem. São 2 pontos em Boa Esperança
+#:   do Norte/MT, município que o cadastro do BACEN já traz e a divisão
+#:   territorial da API de Malhas ainda não.
+#:
+#: O teto é 0,1% e não zero porque zero reprovaria o país inteiro por causa de
+#: uma grafia errada na fonte e de um município novo. E não é "qualquer
+#: número": passar de 0,1% deixa de ser anomalia de cadastro e vira defeito do
+#: de-para nome->código, que é o que estes testes existem para pegar.
+FRACAO_MAXIMA_SEM_MUNICIPIO = 0.001
+
+
+@pytest.fixture(scope="module")
+def sem_municipio_na_malha(pontos, agregado) -> pd.DataFrame:
+    """Os pontos que o join com a malha não alcança, com a causa de cada um."""
+    codigos = set(agregado["municipio_ibge"])
+    return pontos[~pontos["municipio_ibge"].isin(codigos)]
+
+
+def _exigir_perda_aceitavel(perdidos, total, contexto):
+    """Reprova se a perda passar de `FRACAO_MAXIMA_SEM_MUNICIPIO`."""
+    limite = max(int(total * FRACAO_MAXIMA_SEM_MUNICIPIO), 1)
+    if len(perdidos) <= limite:
+        return
+    sem_codigo = int(perdidos["municipio_ibge"].isna().sum())
+    pytest.fail(
+        f"{contexto}: {len(perdidos)} de {total} pontos ({len(perdidos)/total:.2%}) "
+        f"não entram no agregado, acima do teto de {limite}. "
+        f"{sem_codigo} sem `municipio_ibge` e "
+        f"{len(perdidos) - sem_codigo} com código fora da malha "
+        f"({sorted(perdidos['municipio_ibge'].dropna().unique())[:10]!r}). "
+        "Uma perda desse tamanho não é anomalia de cadastro: confira o de-para "
+        "nome->código em `etl_bacen.padronizar_municipio_ibge` e se a malha "
+        "está na mesma divisão territorial do BACEN."
+    )
+
+
 # --------------------------------------------------------------------------- #
 # 3. Código IBGE no padrão de 7 dígitos
 # --------------------------------------------------------------------------- #
@@ -169,13 +215,29 @@ def test_codigo_municipio_tem_7_digitos(fonte, request):
     codigo = df["municipio_ibge"]
 
     nulos = int(codigo.isna().sum())
-    assert nulos == 0, (
-        f"{nulos} linha(s) de `{fonte}` sem `municipio_ibge` — sem código não há "
-        "como atribuir o registro a um município."
-    )
+    if fonte == "agregado":
+        # A malha é a fonte do código; ali um nulo é defeito, sem atenuante.
+        assert nulos == 0, (
+            f"{nulos} linha(s) do agregado sem `municipio_ibge` — a malha do "
+            "IBGE é quem fornece o código, então nulo aqui é malha quebrada."
+        )
+    else:
+        # No dataset do BACEN o nulo é o município que o de-para não resolveu.
+        # Ver `FRACAO_MAXIMA_SEM_MUNICIPIO` para por que o limite não é zero.
+        limite = max(int(len(df) * FRACAO_MAXIMA_SEM_MUNICIPIO), 1)
+        assert nulos <= limite, (
+            f"{nulos} de {len(df)} linhas sem `municipio_ibge`, acima do teto "
+            f"de {limite}. Municípios afetados: "
+            f"{sorted(df.loc[codigo.isna(), 'municipio'].unique())[:10]!r}."
+        )
 
-    invalidos = codigo[
-        ~codigo.astype("string").str.fullmatch(r"\d{7}").fillna(False)
+    # O nulo já foi julgado acima, com o critério de cada artefato; aqui a
+    # pergunta é outra — o que EXISTE está no formato certo? Deixar o nulo
+    # nesta peneira faria os dois testes reprovarem pela mesma linha, com a
+    # mensagem errada ("fora do padrão de 7 dígitos: [<NA>]").
+    presentes = codigo.dropna()
+    invalidos = presentes[
+        ~presentes.astype("string").str.fullmatch(r"\d{7}").fillna(False)
     ]
     assert len(invalidos) == 0, (
         f"{len(invalidos)} código(s) fora do padrão de 7 dígitos em `{fonte}`. "
@@ -183,7 +245,7 @@ def test_codigo_municipio_tem_7_digitos(fonte, request):
     )
 
     # Redundante com o fullmatch acima, mas explicita a intenção do padrão.
-    assert all(PADRAO_CODIGO_IBGE.match(str(c)) for c in codigo.unique())
+    assert all(PADRAO_CODIGO_IBGE.match(str(c)) for c in presentes.unique())
 
 
 def test_codigos_do_agregado_pertencem_as_ufs_do_recorte(agregado):
@@ -193,6 +255,31 @@ def test_codigos_do_agregado_pertencem_as_ufs_do_recorte(agregado):
     assert prefixos <= esperados, (
         f"Município fora do recorte {config.nome_do_recorte()} na malha: "
         f"prefixos {sorted(prefixos - esperados)!r}."
+    )
+
+
+def test_geometria_do_agregado_e_sempre_poligonal():
+    """Todo município é `Polygon` ou `MultiPolygon` — nunca uma coleção.
+
+    Não é preciosismo de tipo. O Leaflet monta uma `GeometryCollection` como um
+    GRUPO de camadas aninhado, e um grupo não responde a `getElement`, que é o
+    que o `bindTooltip` da camada de municípios chama ao varrer as feições. O
+    sintoma é o mapa inteiro em branco com os indicadores em "—", e o defeito
+    não aparece em teste nenhum que olhe só os números.
+
+    Foi assim que o reparo de geometria inválida de `ibge_malha` quebrou o mapa
+    nacional: `make_valid` desfez a auto-interseção de Nhamundá/AM e devolveu o
+    polígono junto com um fiapo de linha.
+    """
+    _exigir_arquivo(config.arquivo_agregado_municipio(), "python -m src.agregacao")
+    malha = gpd.read_parquet(config.arquivo_agregado_municipio())
+
+    tipos = malha.geometry.geom_type.value_counts().to_dict()
+    fora = {t: n for t, n in tipos.items() if t not in ("Polygon", "MultiPolygon")}
+    assert not fora, (
+        f"Município(s) com geometria não poligonal: {fora}. "
+        f"Exemplos: "
+        f"{malha.loc[~malha.geometry.geom_type.isin(['Polygon', 'MultiPolygon']), 'municipio_nome'].head().tolist()!r}."
     )
 
 
@@ -263,42 +350,59 @@ def test_agregado_nao_e_mais_antigo_que_o_dataset():
     )
 
 
-def test_soma_das_contagens_bate_com_o_total_de_pontos(pontos, agregado):
+def test_soma_das_contagens_bate_com_o_total_de_pontos(
+    pontos, agregado, sem_municipio_na_malha
+):
     """`total_cooperativas + total_bancos` somados = linhas do dataset filtrado.
 
-    Se a soma for MENOR, algum ponto ficou fora do join — código IBGE do BACEN
-    que não existe na malha do IBGE, ou nulo. Se for MAIOR, houve duplicação de
-    linha no merge.
+    A diferença admitida é EXATAMENTE a dos pontos sem município na malha, e
+    nada além dela: se a soma for menor do que isso, um ponto sumiu no join por
+    outro motivo; se for MAIOR que o total, houve duplicação de linha no merge.
+    Ver `FRACAO_MAXIMA_SEM_MUNICIPIO` para as duas causas admitidas.
     """
     total_pontos = len(pontos)
     soma_agregado = int(
         agregado["total_cooperativas"].sum() + agregado["total_bancos"].sum()
     )
+    perdidos = len(sem_municipio_na_malha)
 
-    if soma_agregado != total_pontos:
-        codigos_malha = set(agregado["municipio_ibge"])
-        perdidos = pontos[~pontos["municipio_ibge"].isin(codigos_malha)]
-        pytest.fail(
-            f"Soma das contagens do agregado ({soma_agregado}) != linhas do "
-            f"dataset filtrado ({total_pontos}); diferença de "
-            f"{total_pontos - soma_agregado}. "
-            f"{len(perdidos)} ponto(s) têm `municipio_ibge` ausente da malha, "
-            f"códigos: {sorted(perdidos['municipio_ibge'].dropna().unique())[:10]!r}"
-        )
+    _exigir_perda_aceitavel(sem_municipio_na_malha, total_pontos, "soma do agregado")
+    assert soma_agregado == total_pontos - perdidos, (
+        f"Soma das contagens do agregado ({soma_agregado}) != linhas do dataset "
+        f"({total_pontos}) menos os {perdidos} ponto(s) sem município na malha. "
+        f"Diferença não explicada: "
+        f"{total_pontos - perdidos - soma_agregado}."
+    )
 
 
-def test_total_por_categoria_bate_com_o_dataset(pontos, agregado):
-    """A quebra por categoria também tem de fechar, não só o total."""
+def test_total_por_categoria_bate_com_o_dataset(
+    pontos, agregado, sem_municipio_na_malha
+):
+    """A quebra por categoria também tem de fechar, não só o total.
+
+    Como no total, o desconto é o dos pontos sem município na malha — mas
+    descontado POR CATEGORIA: um ponto perdido é de cooperativa ou de banco, e
+    somar o desconto no lugar errado esconderia justamente o desequilíbrio que
+    este teste procura.
+    """
+    fora = sem_municipio_na_malha
+    _exigir_perda_aceitavel(fora, len(pontos), "contagem por categoria")
+
     esperado = {
         "total_cooperativas": int(
             (pontos["categoria_if"] == CATEGORIA_COOPERATIVA).sum()
+            - (fora["categoria_if"] == CATEGORIA_COOPERATIVA).sum()
         ),
-        "total_bancos": int((pontos["categoria_if"] == CATEGORIA_BANCO).sum()),
+        "total_bancos": int(
+            (pontos["categoria_if"] == CATEGORIA_BANCO).sum()
+            - (fora["categoria_if"] == CATEGORIA_BANCO).sum()
+        ),
     }
     obtido = {coluna: int(agregado[coluna].sum()) for coluna in esperado}
     assert obtido == esperado, (
         f"Contagem por categoria divergente entre os dois artefatos: "
-        f"agregado={obtido}, dataset={esperado}."
+        f"agregado={obtido}, dataset menos os {len(fora)} sem município="
+        f"{esperado}."
     )
 
 

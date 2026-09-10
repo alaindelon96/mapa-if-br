@@ -182,18 +182,28 @@ REGRAS_BANDEIRA_POR_CNPJ = [
 #: nenhuma lista de filiação, a linha cai em `SUB_CATEGORIA_COOP_INDEFINIDA` em
 #: vez de ser adivinhada.
 #:
-#: Verificado na safra 202606 (RS/SC/PR): estes sete padrões não se sobrepõem —
+#: Verificado na safra 202606 (RS/SC/PR): estes padrões não se sobrepõem —
 #: nenhuma razão social casa dois deles ao mesmo tempo —, portanto a ordem
 #: abaixo não altera o resultado. Ela é mantida explícita para que a
 #: precedência siga determinística caso surjam nomes ambíguos em safras futuras.
+#:
+#: QUEM MERECE BANDEIRA PRÓPRIA (decisão da safra 202608, no recorte nacional):
+#: o sistema tem de somar mais de 100 pontos no país. A lista anterior fora
+#: calibrada na paisagem do Sul, onde três sistemas regionais pareciam grandes
+#: e nacionalmente não são — Credicoamo (53 pontos em 3 UFs), Uniprime (46 em
+#: 6) e Sulcredi (27 numa só). Os três saíram daqui para
+#: `MARCAS_OUTRAS_COOPERATIVAS`: continuam NOMEADOS no tooltip e no popup, mas
+#: filtram e são coloridos como "Outra Cooperativa".
+#:
+#: O corte é sobre PONTOS, e não sobre número de UFs, porque é a quantidade de
+#: pontos que decide se uma linha do painel de bandeiras mostra alguma coisa no
+#: mapa: uma bandeira de 27 pontos, marcada sozinha, pinta 27 municípios de
+#: 5.570 e deixa o resto em cinza.
 REGRAS_BANDEIRA_COOPERATIVA = [
     ("Sicredi", r"\bSICREDI\b"),
     ("Sicoob", r"\bSICOOB\b"),
     ("Cresol", r"\bCRESOL\b"),
     ("Unicred", r"\bUNICRED\b"),
-    ("Uniprime", r"\bUNIPRIME\b"),
-    ("Sulcredi", r"\bSULCREDI\b"),
-    ("Credicoamo", r"\bCREDICOAMO\b"),
     # Fallback do Ailos: nenhuma linha da safra 202606 traz "AILOS" escrito,
     # mas a regra fica aqui para capturar a Central caso ela venha a operar
     # pontos próprios sem constar em CNPJS_AILOS.
@@ -243,6 +253,13 @@ REGRAS_BANDEIRA_POR_INSTALACAO = REGRAS_BANDEIRA_COOPERATIVA
 #: nenhum — como acontecia com o Ailos, que só foi resolvido por lista de CNPJ
 #: declarada pela própria central (ver `config.CNPJS_AILOS`).
 MARCAS_OUTRAS_COOPERATIVAS = [
+    # Os três que já foram bandeira própria e foram rebaixados pelo corte de
+    # 100 pontos — ver `REGRAS_BANDEIRA_COOPERATIVA`. Vêm primeiro porque são
+    # os maiores do balde; o padrão é o MESMO que os identificava como
+    # bandeira, então nada muda no que a regra lê, só no que ela produz.
+    ("Credicoamo", r"\bCREDICOAMO\b"),
+    ("Uniprime", r"\bUNIPRIME\b"),
+    ("Sulcredi", r"\bSULCREDI\b"),
     ("Sisprime", r"\bSISPRIME\b"),
     ("Lar Credi", r"\bLAR CREDI\b"),
     ("Credi&Gente", r"\bCREDI&GENTE\b"),
@@ -919,7 +936,10 @@ def imprimir_resumo(df: pd.DataFrame, top_indefinidas: int = 15) -> None:
         top_indefinidas: quantos nomes de "Outra Cooperativa" listar.
     """
     print("=" * 78)
-    print("RESUMO — data/processed/if_sul_categorizado.parquet")
+    print(
+        "RESUMO — "
+        f"{config.arquivo_if_categorizado().relative_to(config.BASE_DIR)}"
+    )
     print("=" * 78)
     print(f"Total de linhas: {len(df)}\n")
 

@@ -437,10 +437,23 @@ URL_IBGE_CNEFE = (
 #: Sul, baixados uma única vez; `data/raw/` inteiro está no .gitignore.
 DIR_CNEFE = RAW_DIR / "cnefe"
 
-#: Timeout (segundos) do download de um ZIP do CNEFE. Os arquivos vão de 113 MB
-#: (SC) a 236 MB (RS), e a ~2,4 MB/s medidos o maior leva ~100 s — o valor
+#: Timeout (segundos) do download de um ZIP do CNEFE. Os arquivos vão de 7 MB
+#: (AC) a 1,08 GB (SP), e a ~2,4 MB/s medidos o maior leva ~7,5 min — o valor
 #: abaixo cobre uma conexão bem mais lenta antes de desistir.
 TIMEOUT_CNEFE = 1800
+
+#: Quantas vezes um download do CNEFE é tentado antes de a etapa desistir.
+#:
+#: O FTP do IBGE derruba a conexão no meio de um arquivo com alguma frequência
+#: (``IncompleteRead``), e num recorte nacional são 27 downloads seguidos: sem
+#: retentativa, uma queda em qualquer um deles derruba um pipeline de dezenas
+#: de minutos, e a execução seguinte refaz a varredura inteira do que já estava
+#: em cache. Quatro tentativas cobrem a instabilidade passageira sem insistir
+#: contra um servidor que está de fato fora.
+TENTATIVAS_CNEFE = 4
+
+#: Segundos de espera antes da 2ª tentativa; dobra a cada uma seguinte.
+ESPERA_CNEFE = 5.0
 
 # O destino dos pontos geocodificados é derivado do recorte — ver
 # `arquivo_pontos_geocodificados`.

@@ -29,6 +29,7 @@ from pathlib import Path
 
 import geopandas as gpd
 import pandas as pd
+import shapely
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
@@ -398,6 +399,92 @@ def padronizar_codigo_malha(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
     return resultado
 
 
+def reparar_geometrias(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+    """Conserta os polígonos inválidos que a malha do IBGE às vezes traz.
+
+    A malha vem em qualidade `intermediaria` (ver `config.QUALIDADE_MALHA`), e a
+    generalização ocasionalmente cruza o contorno consigo mesmo. O polígono
+    resultante desenha normalmente — o Leaflet só segue os pontos do anel —,
+    mas QUALQUER operação de topologia sobre ele falha: no recorte nacional da
+    safra 202608 são 3 municípios (Nhamundá/AM, Barbalha/CE e Juína/MT), e eram
+    eles que derrubavam a dissolução das divisas estaduais com
+    ``TopologyException: side location conflict``.
+
+    O reparo é feito AQUI, uma vez, e não no ponto em que a exceção aparece:
+    a mesma geometria alimenta o coroplético, a dissolução das divisas e a
+    conferência espacial de `cnefe.conferir_dentro_do_municipio`. Consertar só
+    onde estourou deixaria as outras duas trabalhando sobre um polígono que o
+    GEOS considera inválido.
+
+    Só as feições inválidas são tocadas: `make_valid` é caro e pode reescrever
+    o contorno, e não há motivo para passá-lo sobre 5.567 polígonos sadios.
+    Medido no recorte nacional: nenhum ponto muda de veredito na conferência
+    espacial por causa do reparo — ele conserta a topologia, não a posição.
+
+    O resultado é sempre POLIGONAL, e essa parte não é preciosismo. Ao desfazer
+    uma auto-interseção, `make_valid` pode devolver uma `GeometryCollection`
+    com o polígono E o fiapo de linha que sobrou — foi o que aconteceu com
+    Nhamundá/AM. O Leaflet monta uma `GeometryCollection` como um GRUPO de
+    camadas aninhado, e um grupo não tem `getElement`: `bindTooltip` na camada
+    de municípios varre as feições chamando exatamente esse método e morre com
+    "t.getElement is not a function" — o mapa inteiro fica em branco, com os
+    indicadores em "—". Descartar as partes não poligonais é o que mantém uma
+    feição por município, todas do mesmo tipo.
+
+    Args:
+        gdf: malha recém-carregada, com geometria.
+
+    Returns:
+        O MESMO GeoDataFrame quando tudo já é válido; uma cópia com os
+        inválidos consertados e reduzidos à parte poligonal, caso contrário.
+    """
+    invalidas = ~gdf.geometry.is_valid
+    quantas = int(invalidas.sum())
+    if not quantas:
+        return gdf
+
+    resultado = gdf.copy()
+    resultado.loc[invalidas, "geometry"] = (
+        resultado.loc[invalidas, "geometry"].make_valid().map(_apenas_poligonos)
+    )
+    _LOGGER.warning(
+        "%d município(s) vieram com geometria inválida da API de Malhas e "
+        "foram reparados: %r.",
+        quantas,
+        gdf.loc[invalidas, "municipio_ibge"].tolist()[:10],
+    )
+    return resultado
+
+
+def _apenas_poligonos(geometria):
+    """Reduz o resultado de `make_valid` à sua parte poligonal.
+
+    Args:
+        geometria: o que `make_valid` devolveu — pode ser `Polygon`,
+            `MultiPolygon` ou uma `GeometryCollection` com sobras lineares.
+
+    Returns:
+        A geometria poligonal equivalente. Se não sobrar nenhuma parte
+        poligonal — o que significaria um município sem área —, devolve o que
+        veio, para que a anomalia apareça em vez de virar um vazio silencioso.
+    """
+    if geometria is None or geometria.geom_type in ("Polygon", "MultiPolygon"):
+        return geometria
+    partes = [
+        parte
+        for parte in shapely.get_parts(geometria)
+        if parte.geom_type in ("Polygon", "MultiPolygon")
+    ]
+    if not partes:
+        _LOGGER.warning(
+            "Geometria reparada ficou sem parte poligonal (%s); mantida como "
+            "veio.",
+            geometria.geom_type,
+        )
+        return geometria
+    return shapely.union_all(partes)
+
+
 # --------------------------------------------------------------------------- #
 # 4. Enriquecimento: nome oficial e população estimada
 # --------------------------------------------------------------------------- #
@@ -650,7 +737,8 @@ def obter_malha(
        ``data/raw/malha_municipios_<recorte>.geojson`` (`baixar_malha`);
     2. carrega o GeoJSON como GeoDataFrame em EPSG:4326 (`carregar_malha`);
     3. padroniza o código do município como string de 7 dígitos, com a mesma
-       função usada no ETL do BACEN (`padronizar_codigo_malha`);
+       função usada no ETL do BACEN (`padronizar_codigo_malha`), e conserta os
+       polígonos que a generalização deixou inválidos (`reparar_geometrias`);
     4. opcionalmente busca nome oficial e população estimada mais recente nas
        APIs de Localidades e de Agregados (`enriquecer_malha`).
 
@@ -683,6 +771,7 @@ def obter_malha(
 
     gdf = carregar_malha(caminho)
     gdf = padronizar_codigo_malha(gdf)
+    gdf = reparar_geometrias(gdf)
 
     nomes = populacao = None
     if com_atributos:

@@ -107,6 +107,7 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 import zipfile
 from pathlib import Path
 
@@ -294,11 +295,12 @@ def baixar_uf(uf: str, usar_cache: bool = True) -> Path:
         O caminho do ZIP em ``data/raw/cnefe/``.
 
     Raises:
-        requests.HTTPError: se o FTP do IBGE recusar a requisição.
+        requests.HTTPError: se o FTP do IBGE recusar a requisição, depois de
+            `config.TENTATIVAS_CNEFE` tentativas.
         requests.exceptions.SSLError: em máquina com antivírus/proxy que
             inspeciona HTTPS. É a mesma causa descrita em `pipeline._DICA_TLS`;
             a saída é apontar ``REQUESTS_CA_BUNDLE`` para o certificado raiz
-            dessa ferramenta.
+            dessa ferramenta. Esta NÃO é retentada: ela não passa sozinha.
     """
     codigo_uf = config.CODIGO_UF[uf]
     nome = f"{codigo_uf}_{uf}.zip"
@@ -324,17 +326,61 @@ def baixar_uf(uf: str, usar_cache: bool = True) -> Path:
     rede.usar_certificados_do_sistema()
     destino.parent.mkdir(parents=True, exist_ok=True)
     url = f"{config.URL_IBGE_CNEFE}/{nome}"
-    _LOGGER.info("CNEFE %s: baixando %s ...", uf, url)
 
     # Gravação em arquivo temporário e rename ao final: interromper o download
     # no meio (Ctrl+C, queda de rede) deixaria um ZIP truncado no cache, e a
     # execução seguinte o aceitaria como bom.
     parcial = destino.with_suffix(".zip.parcial")
-    with requests.get(url, stream=True, timeout=config.TIMEOUT_CNEFE) as resposta:
-        resposta.raise_for_status()
-        with parcial.open("wb") as arquivo:
-            for pedaco in resposta.iter_content(chunk_size=1 << 20):
-                arquivo.write(pedaco)
+
+    # O FTP do IBGE derruba a conexão no meio de um arquivo com alguma
+    # frequência. Numa execução nacional são 27 downloads seguidos, e sem
+    # retentativa a primeira queda derruba o pipeline inteiro — e a execução
+    # seguinte refaz a varredura de tudo que já estava em cache. Ver
+    # `config.TENTATIVAS_CNEFE`.
+    #
+    # Cada tentativa recomeça o arquivo do zero: o FTP não anuncia suporte a
+    # `Range`, e retomar de um byte arbitrário sem essa garantia produziria um
+    # ZIP silenciosamente remendado — pior que baixar de novo.
+    for tentativa in range(1, config.TENTATIVAS_CNEFE + 1):
+        sufixo = (
+            "" if tentativa == 1
+            else f" (tentativa {tentativa}/{config.TENTATIVAS_CNEFE})"
+        )
+        _LOGGER.info("CNEFE %s: baixando %s ...%s", uf, url, sufixo)
+        try:
+            with requests.get(
+                url, stream=True, timeout=config.TIMEOUT_CNEFE
+            ) as resposta:
+                resposta.raise_for_status()
+                with parcial.open("wb") as arquivo:
+                    for pedaco in resposta.iter_content(chunk_size=1 << 20):
+                        arquivo.write(pedaco)
+
+            # Conferir o ZIP ANTES do rename, e não só na leitura seguinte: uma
+            # resposta completa mas corrompida passaria pelo `raise_for_status`
+            # e entraria no cache como boa.
+            if not zipfile.is_zipfile(parcial):
+                raise zipfile.BadZipFile(
+                    f"o arquivo baixado de {url} não é um ZIP válido"
+                )
+        except requests.exceptions.SSLError:
+            # Falha de certificado não passa sozinha — insistir só atrasa a
+            # mensagem que diz como resolver. Ver `pipeline._DICA_TLS`.
+            parcial.unlink(missing_ok=True)
+            raise
+        except (requests.RequestException, zipfile.BadZipFile) as erro:
+            parcial.unlink(missing_ok=True)
+            if tentativa == config.TENTATIVAS_CNEFE:
+                raise
+            espera = config.ESPERA_CNEFE * (2 ** (tentativa - 1))
+            _LOGGER.warning(
+                "CNEFE %s: download falhou (%s). Nova tentativa em %.0f s.",
+                uf, erro, espera,
+            )
+            time.sleep(espera)
+        else:
+            break
+
     parcial.replace(destino)
 
     _LOGGER.info(
@@ -902,11 +948,32 @@ def posicionar_no_municipio(
 
     sem_municipio = resultado["lat_municipio"].isna() & resultado["latitude"].isna()
     if int(sem_municipio.sum()):
+        # Duas causas diferentes caem aqui, e o log as separa porque o remédio
+        # de cada uma é outro:
+        #
+        # * `municipio_ibge` AUSENTE — o de-para nome->código não resolveu o
+        #   município publicado pelo BACEN, quase sempre por grafia divergente
+        #   na fonte. No recorte nacional da safra 202608 é 1 ponto, um Itaú
+        #   cujo município vem escrito "GOIANA/GO" (Goiana é em PE);
+        # * código PRESENTE mas fora da malha — divisão territorial divergente
+        #   entre o cadastro do BACEN e a malha do IBGE. São 2 pontos.
+        #
+        # Os ausentes são contados à parte também por uma razão mecânica: eles
+        # não podem entrar em `sorted`. `pd.NA` não é ordenável, e compará-lo
+        # levanta "boolean value of NA is ambiguous" — o que derrubava a etapa
+        # inteira, no fim de uma varredura de 40 minutos, ao montar esta
+        # mensagem. O recorte do Sul não tem nenhum dos dois casos, então o
+        # defeito só apareceu ao rodar o país.
+        codigos = resultado.loc[sem_municipio, "municipio_ibge"]
+        ausentes = int(codigos.isna().sum())
+        conhecidos = sorted(codigos.dropna().unique())
         _LOGGER.warning(
-            "%d ponto(s) com `municipio_ibge` fora da malha ficaram FORA do mapa. "
-            "Códigos: %r",
+            "%d ponto(s) ficaram FORA do mapa: %d sem `municipio_ibge` e %d com "
+            "código que não existe na malha (%r).",
             int(sem_municipio.sum()),
-            sorted(resultado.loc[sem_municipio, "municipio_ibge"].unique())[:10],
+            ausentes,
+            len(codigos) - ausentes,
+            conhecidos[:10],
         )
         resultado = resultado[~sem_municipio]
 

@@ -59,9 +59,6 @@ SUFIXO_POR_SUB_CATEGORIA = {
     "Cresol": "cresol",
     "Ailos": "ailos",
     "Unicred": "unicred",
-    "Uniprime": "uniprime",
-    "Sulcredi": "sulcredi",
-    "Credicoamo": "credicoamo",
     "Outra Cooperativa": "outra_coop",
     # Bancos
     "Banco do Brasil": "bb",

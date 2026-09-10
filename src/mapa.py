@@ -1,7 +1,7 @@
-"""Mapa interativo dos pontos de atendimento financeiro da Região Sul.
+"""Mapa interativo dos pontos de atendimento financeiro.
 
-Monta, sobre um mapa Folium centrado em RS/SC/PR, duas leituras complementares
-do mesmo recorte:
+Monta, sobre um mapa Folium enquadrado no recorte territorial carregado, duas
+leituras complementares do mesmo recorte:
 
 * um **coroplético** por município, colorido pelo total de pontos de
   atendimento (agências + postos), lido de
@@ -56,7 +56,7 @@ que o HTML não pode já nascer montado.
 Por que as camadas de ponto são hierárquicas (e não uma lista plana)
 --------------------------------------------------------------------------
 
-Uma lista plana de 14 camadas obrigaria 14 cliques para esconder "todos os
+Uma lista plana de 11 camadas obrigaria 11 cliques para esconder "todos os
 bancos". A estrutura aqui é de dois níveis, montada com `folium.FeatureGroup`:
 
 * **Nível 1 — grupo pai**: um por `categoria_if` ("Bancos" e "Cooperativas").
@@ -123,7 +123,7 @@ Os marcadores são escondidos por *pane* do Leaflet, e não adicionando e
 removendo camadas — a diferença é de correção, não de estilo, e está explicada
 em `_JS_CONTROLADOR`: mexer nas camadas por fora do painel faz o
 `L.Control.Layers` se reconstruir e recopiar cada caixa de seleção da presença
-da camada no mapa, o que desmarcava as 14 bandeiras ao entrar no modo cidade.
+da camada no mapa, o que desmarcava as 11 bandeiras ao entrar no modo cidade.
 Para que o coroplético seja controlado sem levar os marcadores junto, ele
 desenha num pane próprio (`PANE_COROPLETICO`) — por padrão os dois estariam no
 mesmo ``overlayPane`` e, com `prefer_canvas`, no mesmo ``<canvas>``.
@@ -183,12 +183,12 @@ mesma cor, escurecido.
 Isso REVERTE a escolha anterior, em que a cor separava apenas as duas
 categorias (bancos x cooperativas) e a bandeira só aparecia no painel e no
 popup. A objeção que motivava aquela escolha continua válida e vale registrar:
-14 matizes não são 14 cores distinguíveis, várias das marcas se aproximam entre
-si (o verde do Sicredi e o verde-limão da Cresol; os três azuis de Unicred,
-Uniprime e Credicoamo) e nenhuma paleta de 14 é segura para daltonismo. Quem
-precisar comparar DUAS bandeiras específicas não deve tentar fazê-lo a olho
-sobre as 14 ligadas — deve desligar as outras no painel, que é a leitura para a
-qual a hierarquia de camadas existe.
+11 matizes não são 11 cores distinguíveis, várias das marcas se aproximam entre
+si (o verde do Sicredi e o verde-limão da Cresol; os dois vermelhos de Bradesco
+e Santander; os azuis de Unicred e Caixa) e nenhuma paleta desse tamanho é
+segura para daltonismo. Quem precisar comparar DUAS bandeiras específicas não
+deve tentar fazê-lo a olho sobre as 11 ligadas — deve desligar as outras no
+painel, que é a leitura para a qual a hierarquia de camadas existe.
 
 O que a mudança compra em troca: com todas ligadas, dá para ver onde uma marca
 domina e onde ela não chega, o que a codificação por categoria não mostrava de
@@ -221,7 +221,7 @@ A cor de cada município NÃO é decidida em Python. O folium compila uma
 `style_function` num ``switch(feature.id)`` estático em JavaScript, o que fixa
 a cor no momento da geração — e o requisito aqui é o oposto: a cor tem de
 responder ao que está marcado no painel. Então a malha vai para o HTML com as
-14 colunas ``total_<bandeira>`` nas propriedades de cada feição, e um
+11 colunas ``total_<bandeira>`` nas propriedades de cada feição, e um
 controlador em JavaScript (`_JS_CONTROLADOR`) faz o resto:
 
 * escuta ``overlayadd``/``overlayremove`` do Leaflet e mantém o conjunto de
@@ -240,7 +240,8 @@ As classes são **recalculadas a cada seleção**, e não fixas. Isso contraria 
 regra usual de manter cortes fixos para que a mesma cor signifique sempre a
 mesma coisa, e a exceção tem motivo: a amplitude varia em duas ordens de
 grandeza conforme a seleção — o total geral chega a 406 pontos num município,
-enquanto Sulcredi inteiro tem máximo 3. Cortes fixos que sirvam ao total
+enquanto uma bandeira pequena não passa de 2 ou 3 num município. Cortes
+fixos que sirvam ao total
 jogariam toda bandeira pequena na classe mais clara, e o mapa não mostraria
 nada justamente quando o usuário filtra. O risco de ambiguidade é aceitável
 aqui porque a legenda é reescrita junto, na mesma ação e na mesma tela — ao
@@ -329,10 +330,59 @@ COR_LINHA = "#dbe6e8"
 #: trocar de safra não deixe o cabeçalho mentindo.
 TITULO_MAPA = "Mapa da Presença Física das Cooperativas e Bancos"
 OLHO_MAPA = "Cobertura &middot; Mapa interativo"
-SUBTITULO_MAPA = (
-    "Agências e postos de atendimento no Rio Grande do Sul, Santa Catarina "
-    "e Paraná."
-)
+
+
+def rotulo_do_recorte(agregado: gpd.GeoDataFrame) -> str:
+    """Nome curto do território coberto, para a faixa de marca.
+
+    Sai do agregado, e não de `config.SIGLAS_UF`: o mapa é gerado a partir do
+    arquivo que está em disco, que pode ter sido produzido por outro recorte —
+    ``python -m src.mapa`` sobre o agregado nacional é esse caso, e a faixa não
+    pode dizer "Região Sul" sobre um mapa do Brasil.
+
+    Args:
+        agregado: saída de `carregar_agregado`.
+
+    Returns:
+        ``"Brasil"``, ``"Região Sul"`` ou ``"3 UFs"``, conforme o recorte case
+        ou não com o país ou com uma região.
+    """
+    ufs = ufs_do_recorte(agregado)
+    if set(ufs) == set(config.SIGLAS_BR):
+        return "Brasil"
+    for regiao, da_regiao in config.REGIOES.items():
+        if set(ufs) == set(da_regiao):
+            return f"Região {regiao}"
+    return f"{len(ufs)} UFs"
+
+
+def subtitulo_do_recorte(agregado: gpd.GeoDataFrame) -> str:
+    """Linha de apoio do cabeçalho, com o tamanho do território coberto.
+
+    A construção é sempre "nos N municípios <de algo>", e não "no Rio Grande do
+    Sul, Santa Catarina e Paraná" como a constante fixa que ela substitui. O
+    motivo é gramatical, e aparece assim que o recorte deixa de ser o Sul: a
+    preposição correta muda com a UF ("no Paraná", "em São Paulo", "na Bahia"),
+    e não há forma de encadear 27 nomes sem escolher uma que erre em algumas
+    delas. "Municípios da Região Norte" e "municípios do Brasil" concordam
+    sempre.
+
+    Args:
+        agregado: saída de `carregar_agregado`.
+
+    Returns:
+        A frase pronta, já com o total de municípios formatado.
+    """
+    quantos = f"{len(agregado):,}".replace(",", ".")
+    rotulo = rotulo_do_recorte(agregado)
+    onde = "do Brasil" if rotulo == "Brasil" else (
+        f"da {rotulo}" if rotulo.startswith("Região")
+        else "de " + ", ".join(ufs_do_recorte(agregado))
+    )
+    return (
+        f"Agências e postos de atendimento nos {quantos} municípios {onde}."
+    )
+
 CREDITO_FONTES = (
     "Fontes: BACEN — agências e postos de atendimento (posição {data}); "
     "IBGE — malha municipal, população estimada e CNEFE/Censo 2022."
@@ -428,7 +478,8 @@ PALETA_COROPLETICO = [
 #:
 #: Seis é o teto usual de classes distinguíveis numa rampa sequencial; acima
 #: disso o olho não separa os passos e a legenda vira decoração. O número
-#: efetivo pode ser menor: com poucos valores distintos (Sulcredi vai só até 3)
+#: efetivo pode ser menor: com poucos valores distintos (uma bandeira pequena
+#: não passa de 2 ou 3 por município)
 #: o controlador emite uma classe por valor em vez de inventar faixas vazias.
 MAX_CLASSES = 6
 
@@ -441,10 +492,10 @@ MAX_CLASSES = 6
 #: chapada perderia a informação de quantidade.
 #:
 #: ATENÇÃO à confiabilidade destes valores. Os cinco bancos, Sicredi e Sicoob
-#: usam cores muito conhecidas e conferidas. Já Cresol, Ailos, Unicred,
-#: Uniprime, Sulcredi e Credicoamo são APROXIMAÇÕES pela identidade visual
-#: dessas marcas — plausíveis, mas não extraídas de manual de marca. Corrigir
-#: qualquer uma é editar uma linha aqui; nada mais no código depende do valor.
+#: usam cores muito conhecidas e conferidas. Já Cresol, Ailos e Unicred são
+#: APROXIMAÇÕES pela identidade visual dessas marcas — plausíveis, mas não
+#: extraídas de manual de marca. Corrigir qualquer uma é editar uma linha aqui;
+#: nada mais no código depende do valor.
 CORES_BANDEIRA = {
     # --- Bancos --------------------------------------------------------- #
     "Banco do Brasil": "#F9DD16",  # amarelo BB
@@ -458,9 +509,6 @@ CORES_BANDEIRA = {
     "Cresol": "#7AB800",  # verde-limão Cresol (aproximado)
     "Ailos": "#00A9E0",  # azul Ailos (aproximado)
     "Unicred": "#005CA9",  # azul Unicred (aproximado)
-    "Uniprime": "#0B4DA2",  # azul Uniprime (aproximado)
-    "Sulcredi": "#8CC63F",  # verde Sulcredi (aproximado)
-    "Credicoamo": "#004B8D",  # azul Credicoamo (aproximado)
     "Outra Cooperativa": "#6A5ACD",  # roxo neutro: rótulo agregado, não é marca
 }
 
@@ -491,12 +539,20 @@ OPACIDADE_COROPLETICO = 0.78
 
 #: Traço da divisa entre estados.
 #:
-#: Grosso e escuro contra o fio claro e fino do município: a diferença entre os
-#: dois é o que faz a hierarquia UF -> município ser lida sem legenda. É o
-#: petróleo escuro da identidade, e não preto: tem contraste de sobra sobre o
-#: Positron sem o peso do preto, que brigaria com os marcadores.
+#: Mais grosso e mais escuro que o fio claro e fino do município: a diferença
+#: entre os dois é o que faz a hierarquia UF -> município ser lida sem legenda.
+#: É o petróleo escuro da identidade, e não preto: tem contraste de sobra sobre
+#: o Positron sem o peso do preto, que brigaria com os marcadores.
+#:
+#: O valor caiu de 2,4 para 1,5 px quando o mapa passou do Sul para o país. Não
+#: é questão de gosto: com TRÊS estados a divisa é um traço isolado no meio do
+#: mapa, e 2,4 px o tornam legível; com VINTE E SETE ela vira uma malha que
+#: cobre o Brasil inteiro, e a mesma espessura passa a competir com o
+#: coroplético — que é o dado — em vez de emoldurá-lo. A razão para o contorno
+#: do município continua alta o bastante (1,5 contra 0,4) para a hierarquia não
+#: se perder.
 COR_DIVISA_UF = COR_PETROLEO_ESCURO
-LARGURA_DIVISA_UF = 2.4
+LARGURA_DIVISA_UF = 1.5
 
 #: Painéis (*panes*) do Leaflet criados para este mapa, e o z-index de cada um.
 #:
@@ -528,11 +584,16 @@ ROTULO_GRUPO = {
 
 #: `sub_categoria` de cada grupo, na ordem em que aparecem no painel (nível 2).
 #:
-#: Cobre as 14 sub_categorias da safra 202606 — incluindo Uniprime, Sulcredi e
-#: Credicoamo, que somam 113 pontos. Elas ganham subgrupo próprio em vez de
-#: entrar em "Outra Cooperativa" para que a soma dos subgrupos de cooperativa
-#: reconcilie exatamente com `total_cooperativas` do coroplético, e para que o
-#: subgrupo "Outra Cooperativa" continue significando a mesma coisa que a coluna
+#: São 11 na safra 202608 — cinco sistemas cooperativos com bandeira própria,
+#: o balde "Outra Cooperativa" e os cinco bancos. Quem entra na lista de
+#: cooperativas é decidido em `etl_bacen.REGRAS_BANDEIRA_COOPERATIVA`, pelo
+#: corte de 100 pontos no país; esta lista só reproduz o resultado, na ordem em
+#: que o painel os mostra.
+#:
+#: O balde vem por último, e não em ordem de tamanho, porque ele não é uma
+#: marca: é o resto. Ele existe como subgrupo próprio para que a soma dos
+#: subgrupos de cooperativa reconcilie exatamente com `total_cooperativas` do
+#: coroplético, e para que o subgrupo signifique a mesma coisa que a coluna
 #: `total_outra_coop` do Parquet.
 #:
 #: Bandeira que apareça em safra futura e não esteja aqui NÃO é descartada
@@ -545,9 +606,6 @@ ORDEM_SUB_CATEGORIAS = {
         "Cresol",
         "Ailos",
         "Unicred",
-        "Uniprime",
-        "Sulcredi",
-        "Credicoamo",
         "Outra Cooperativa",
     ],
     CATEGORIA_BANCO: [
@@ -690,7 +748,7 @@ MAX_LARGURA_POPUP_MUNICIPIO = 352
 #: Quanto o contorno do marcador é escurecido em relação ao preenchimento.
 #:
 #: O contorno é derivado da própria cor da marca, e não fixo em branco, porque
-#: nenhuma cor fixa serve para as 14: sobre o basemap claro, um contorno branco
+#: nenhuma cor fixa serve para todas: sobre o basemap claro, um contorno branco
 #: some no amarelo do Banco do Brasil, e um contorno preto engrossa demais as
 #: marcas escuras. Escurecer a própria cor dá borda a todas na mesma medida.
 ESCURECIMENTO_CONTORNO = 0.45
@@ -1798,7 +1856,7 @@ _JS_MUNICIPIO = r"""
     }
 
     /* Tradução de `_linhas_por_bandeira`. Só entram as bandeiras com ao menos
-       1 ponto no município: listar as 14 com zero em quase todas transformaria
+       1 ponto no município: listar as 11 com zero em quase todas transformaria
        o popup numa tabela de zeros, em que a informação — quais bandeiras
        existem ali — fica escondida. */
     function linhasPorBandeira(props, secao) {
@@ -1994,7 +2052,7 @@ def adicionar_coropletico(
     Returns:
         A camada adicionada.
     """
-    # As 14 colunas por bandeira vão para as propriedades da feição porque é o
+    # As 11 colunas por bandeira vão para as propriedades da feição porque é o
     # cliente que soma a seleção atual — sem elas, filtrar por bandeira no
     # navegador seria impossível. É o que permite o coroplético reativo.
     #
@@ -2415,7 +2473,8 @@ def adicionar_moldura(mapa: folium.Map, agregado: gpd.GeoDataFrame) -> None:
         {SVG_ICONE_COOPERATIVISMO}
         <span class="marca-texto">
           <b>Presença Física</b>
-          <small>Cooperativas de crédito e bancos &middot; Região Sul</small>
+          <small>Cooperativas de crédito e bancos &middot;
+            {html.escape(rotulo_do_recorte(agregado))}</small>
         </span>
       </span>
       <span class="selo-safra">Dados de <b>{config.DATA_DADOS}</b></span>
@@ -2427,7 +2486,7 @@ def adicionar_moldura(mapa: folium.Map, agregado: gpd.GeoDataFrame) -> None:
       <div class="app-cabecalho">
         <p class="olho">{OLHO_MAPA}</p>
         <h1>{TITULO_MAPA}</h1>
-        <p class="app-linha-fina">{SUBTITULO_MAPA}</p>
+        <p class="app-linha-fina">{html.escape(subtitulo_do_recorte(agregado))}</p>
       </div>
       {_html_indicadores()}
     </div>
@@ -2591,8 +2650,8 @@ CASAS_COORDENADA = 7
 #: ponto, em vez do valor repetido linha a linha.
 #:
 #: São as de baixa cardinalidade: os 7.603 pontos do Sul têm 2 tipos de
-#: instalação, 4 níveis de precisão, 14 bandeiras, 228 instituições e 1.157
-#: municípios. Escrever "COOPERATIVA DE CRÉDITO, POUPANÇA E INVESTIMENTO DO
+#: instalação, 4 níveis de precisão, 11 bandeiras, 228 instituições e 1.157
+#: municípios; os 30 mil do país têm 2, 4, 11, 700 e 4.474. Escrever "COOPERATIVA DE CRÉDITO, POUPANÇA E INVESTIMENTO DO
 #: NORTE E NORDESTE DE SANTA CATARINA - SICREDI NORTE SC" 200 vezes é o tipo de
 #: repetição que o gzip disfarça no arquivo baixado e o `JSON.parse` do
 #: navegador não.
@@ -3177,8 +3236,8 @@ def adicionar_camadas_de_pontos(
             subgrupo = FeatureGroupSubGroup(
                 grupo_pai,
                 # A amostra de cor é o que torna a pintura por marca legível:
-                # 14 cores no mapa sem nenhuma chave seriam adivinhação, e o
-                # painel já lista exatamente as 14 bandeiras, uma por linha.
+                # Cor no mapa sem nenhuma chave seria adivinhação, e o painel
+                # já lista exatamente as bandeiras, uma por linha.
                 name=(
                     f'<span class="camada-cor" style="background:{cor};'
                     f'border-color:{contorno}"></span>'
@@ -3474,7 +3533,7 @@ _JS_CONTROLADOR = """
        refaz a lista do zero. Refazer a lista descarta os <input> atuais e
        recria cada um com `checked` copiado de `mapa.hasLayer(camada)`. O
        resultado era o modo cidade, que tira todos os marcadores do mapa,
-       DESMARCAR as 14 bandeiras do painel e levar junto a cor do coroplético
+       DESMARCAR as 11 bandeiras do painel e levar junto a cor do coroplético
        — e ainda deixar a cascata presa a caixas que não estavam mais na tela.
 
        Com painéis, a divisão de responsabilidade fica limpa: a caixa marcada
@@ -4146,7 +4205,7 @@ _JS_CONTROLADOR = """
             }
         }
         var n = cfg.maxClasses - 1;
-        /* Poucos valores distintos (Sulcredi vai só até 3): uma classe por
+        /* Poucos valores distintos (uma bandeira pequena não passa de 2 ou 3): uma classe por
            valor, em vez de faixas que ficariam vazias. */
         if (distintos.length <= n) { return distintos; }
 
@@ -4585,8 +4644,8 @@ _JS_CONTROLADOR = """
         });
     });
 
-    /* Com 14 bandeiras, isolar uma custava 13 cliques para desmarcar as
-       outras, e voltar ao total custava os mesmos 13 de volta. Os dois botões
+    /* Com 11 bandeiras, isolar uma custava 10 cliques para desmarcar as
+       outras, e voltar ao total custava os mesmos 10 de volta. Os dois botões
        fazem as duas coisas numa passada.
 
        Eles escrevem nas caixas e chamam `_onInputClick` — o mesmo caminho de um
