@@ -42,7 +42,8 @@ outra: de quando é o dado, quanto existe e onde falta.
   o motivo de a faixa existir — o coroplético mostra onde a rede está, e os
   indicadores dizem o tamanho do que ela deixa de fora;
 * a **barra de controles** reúne as duas escolhas de escopo (o modo de visão e
-  o estado) e a busca de município, tudo numa linha só, acima do mapa;
+  o estado) e a busca de município, acima do mapa — numa linha só onde ela
+  cabe, empilhada em linhas rotuladas em tela estreita;
 * a **coluna lateral** tem as bandeiras (o painel de camadas do Leaflet,
   encaixado ali) e o ranking dos municípios de maior presença, que responde
   "onde a rede se concentra" — pergunta que um coroplético não responde, porque
@@ -1681,15 +1682,47 @@ html, body {
 
 /* --- Telas estreitas ---------------------------------------------------- *
    Abaixo de 1000 px o lado a lado não cabe: a coluna desce para baixo do
-   mapa, os dois ganham altura fixa e a página volta a rolar. */
+   mapa, os dois ganham altura fixa e a página volta a rolar.
+
+   A regra que vale para tudo daqui para baixo: a página rola PARA BAIXO, e
+   nunca para o lado. Rolagem horizontal num mapa é pior que em qualquer outra
+   página, porque o gesto de arrastar já pertence ao mapa — o leitor que tenta
+   trazer de volta o pedaço da barra que sumiu acaba arrastando o Brasil. */
 @media (max-width: 1000px) {
     .app { height: auto; overflow: visible; }
     .app-corpo { padding: 14px 14px 18px; }
-    .indicadores { grid-template-columns: repeat(2, minmax(122px, 1fr)); }
+    /* Faixa inteira e `minmax(0, 1fr)`. Espremidos ao lado do título, os dois
+       cartões por linha ainda exigiam 253 px por causa do piso de 122 px de
+       cada coluna, e o que não cabia VAZAVA para fora da página em vez de
+       descer — a faixa é `flex: 1 1 0`, então ela encolhe abaixo do que a
+       grade interna aceita. Com piso zero as colunas cedem de verdade. */
+    .indicadores {
+        flex-basis: 100%;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
     .area { flex-direction: column; }
     .cartao-mapa { height: 62vh; min-height: 380px; flex: none; }
     .coluna-lateral { width: 100%; }
     .cartao-bandeiras, .cartao-ranking { height: 340px; flex: none; }
+    /* A barra deixa de ser uma linha e vira uma PILHA de linhas rotuladas —
+       leitura, região, estado, busca —, cada grupo com a largura toda.
+
+       O que forçou a mudança é a fila de botões de região: ela não encolhe
+       (os rótulos são `nowrap`) e no recorte Brasil são seis, ~450 px numa
+       tela de 375. Sem `flex-wrap` ali dentro, essa fila era um bloco rígido
+       mais largo que a tela, e era ela que empurrava a PÁGINA INTEIRA para o
+       lado. Quebrar a fila resolve o vazamento; dar a linha inteira a cada
+       grupo é o que mantém a barra legível depois da quebra, com os rótulos
+       alinhados numa coluna só em vez de espalhados pelas sobras.
+
+       Os divisores saem: entre linhas empilhadas eles não separam nada, e
+       sobravam como traços verticais soltos na ponta de cada fila. Quem
+       separa os grupos aqui é o rótulo de cada um. */
+    .barra { row-gap: 6px; }
+    .barra-grupo { flex: 1 1 100%; align-items: flex-start; }
+    .barra-rotulo { padding-top: 8px; }
+    .segmentos { flex: 1 1 auto; flex-wrap: wrap; row-gap: 3px; }
+    .barra-divisor { display: none; }
     .combo-uf { flex: 1 1 140px; width: auto; }
 }
 """
