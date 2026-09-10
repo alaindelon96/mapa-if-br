@@ -1,4 +1,4 @@
-"""Constantes de configuração do projeto mapa-if-sul.
+"""Constantes de configuração do projeto mapa-if-br.
 
 Centraliza caminhos de diretórios e as regras de recorte do dataset
 (estados-alvo, instituições-alvo e segmento de cooperativas).
@@ -12,8 +12,9 @@ from pathlib import Path
 # Caminhos
 # --------------------------------------------------------------------------- #
 
-# BASE_DIR aponta para a raiz do projeto (pasta "mapa-if-sul"), pois este
-# arquivo vive em mapa-if-sul/src/config.py.
+# BASE_DIR aponta para a raiz do projeto, pois este arquivo vive em
+# <raiz>/src/config.py. O nome da pasta não importa: quem clonar para um
+# diretório com outro nome continua funcionando.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 RAW_DIR = BASE_DIR / "data" / "raw"
@@ -53,9 +54,8 @@ LINHA_CABECALHO_BACEN = 9
 #
 # As tabelas abaixo descrevem o PAÍS INTEIRO e são fixas; o que varia de uma
 # execução para outra é `SIGLAS_UF`, o recorte ATIVO, que diz quais dessas UFs
-# entram no dataset, na malha, no CNEFE e no mapa. O padrão é a Região Sul, o
-# recorte com que o projeto nasceu; `definir_recorte` o troca a partir da linha
-# de comando (``--ufs``).
+# entram no dataset, na malha, no CNEFE e no mapa. O padrão é o BRASIL inteiro;
+# `definir_recorte` o troca a partir da linha de comando (``--ufs``).
 
 #: Código IBGE de cada UF. São os dois primeiros dígitos do código de município
 #: (ex.: 4314902 = Porto Alegre, UF 43 = RS), o que permite derivar a UF de
@@ -132,16 +132,21 @@ NOME_UF = {
 #: Todas as 27 UFs, na ordem de código — o recorte nacional.
 SIGLAS_BR = sorted(CODIGO_UF, key=lambda uf: CODIGO_UF[uf])
 
-#: Recorte territorial PADRÃO: a Região Sul.
+#: Recorte territorial PADRÃO: o Brasil inteiro.
 #:
-#: É o recorte com que o projeto nasceu e o que `python main.py` sem argumentos
-#: continua produzindo. Trocá-lo é passar ``--ufs`` na linha de comando.
+#: É o que `python main.py` sem argumentos produz, e é DE PROPÓSITO o mesmo
+#: recorte do mapa publicado: quem clona o repositório e roda o comando óbvio
+#: reproduz o que está no ar. Um padrão que gerasse outra coisa faria a
+#: primeira execução de todo mundo contradizer o site.
 #:
-#: A ordem é RS, SC, PR — a que o projeto sempre usou, e não a de código do
-#: IBGE de `REGIOES`. Ela é preservada porque a ordem do recorte é a ordem em
-#: que as UFs aparecem no filtro de estado da barra: reordená-las trocaria os
-#: botões de lugar sem que nenhum dado mudasse.
-RECORTE_PADRAO = ["RS", "SC", "PR"]
+#: O preço é que essa primeira execução é cara — ~3,9 GB de CNEFE e dezenas de
+#: minutos —, e quem quiser o caminho barato pede o recorte menor:
+#: ``--ufs Sul`` leva ~580 MB e ~1,5 min. O `main` avisa, antes de começar,
+#: quantas UFs faltam baixar (ver `main._anunciar_inicio`).
+#:
+#: O projeto nasceu com a Região Sul como padrão, e o nome do repositório é
+#: dessa época.
+RECORTE_PADRAO = list(SIGLAS_BR)
 
 #: Recorte ATIVO desta execução — a lista de UFs que o pipeline inteiro enxerga.
 #:

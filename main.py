@@ -1,4 +1,4 @@
-"""Ponto de entrada do projeto mapa-if-sul.
+"""Ponto de entrada do projeto mapa-if-br.
 
 Roda o pipeline completo — planilhas do BACEN -> mapa interativo — e é a camada
 que conversa com quem está no terminal: monta a linha de comando, liga os logs
@@ -10,8 +10,8 @@ rodar, `main` sabe como reportar.
 
 Uso::
 
-    python main.py                    # Região Sul (padrão), tudo em cache
-    python main.py --ufs BR           # o país inteiro, 27 UFs
+    python main.py                    # o Brasil inteiro (padrão), 27 UFs
+    python main.py --ufs Sul          # só a Região Sul, bem mais rápido
     python main.py --ufs SP,RJ,MG     # um recorte qualquer
     python main.py --sem-cache-malha  # rebaixa a malha da API do IBGE
     python main.py -v                 # inclui o log de nível DEBUG
@@ -253,8 +253,8 @@ def montar_parser() -> argparse.ArgumentParser:
         prog="main.py",
         description=(
             "Gera o mapa de cobertura de cooperativas de crédito e dos cinco "
-            "maiores bancos. O recorte territorial padrão é a Região Sul "
-            "(RS, SC, PR); use --ufs para ampliá-lo."
+            "maiores bancos. O recorte territorial padrão é o Brasil inteiro "
+            "(27 UFs); use --ufs para recortá-lo."
         ),
         epilog=(
             "Sem argumentos, tudo que já foi baixado é reaproveitado de data/raw/ "
@@ -272,7 +272,8 @@ def montar_parser() -> argparse.ArgumentParser:
         help=(
             "recorte territorial: BR para as 27 UFs, o nome de uma região "
             "(Norte, Nordeste, Centro-Oeste, Sudeste, Sul) ou siglas separadas "
-            "por vírgula (ex.: RS,SC,PR). Padrão: a Região Sul."
+            "por vírgula (ex.: RS,SC,PR). Padrão: o Brasil inteiro. Um recorte "
+            "menor baixa menos CNEFE e roda em uma fração do tempo."
         ),
     )
     parser.add_argument(
@@ -335,13 +336,28 @@ def _anunciar_inicio(args: argparse.Namespace) -> None:
         args: os argumentos já processados.
     """
     malha = "rebaixar da API" if args.sem_cache_malha else "usar cache de data/raw/"
-    cnefe = (
-        f"rebaixar ({len(config.SIGLAS_UF)} UF(s))"
-        if args.sem_cache_cnefe
-        else "usar cache de data/raw/cnefe/"
-    )
+
+    # Quantos ZIP do CNEFE faltam, e o que isso custa. Deixar essa conta na
+    # tela ANTES de começar passou a importar quando o padrão virou o país
+    # inteiro: quem roda `python main.py` pela primeira vez dispara ~3,9 GB de
+    # download sem ter pedido nada, e merece saber disso enquanto ainda dá
+    # tempo de interromper e pedir um recorte menor.
+    faltando = [
+        uf
+        for uf in config.SIGLAS_UF
+        if not (config.DIR_CNEFE / f"{config.CODIGO_UF[uf]}_{uf}.zip").exists()
+    ]
+    if args.sem_cache_cnefe:
+        cnefe = f"rebaixar TODAS as {len(config.SIGLAS_UF)} UF(s)"
+    elif faltando:
+        cnefe = (
+            f"baixar {len(faltando)} de {len(config.SIGLAS_UF)} UF(s) "
+            f"[{', '.join(faltando)}]"
+        )
+    else:
+        cnefe = "usar cache de data/raw/cnefe/"
     print("=" * 78)
-    print("mapa-if-sul — cobertura de cooperativas de crédito e dos 5 maiores bancos")
+    print("mapa-if-br — cobertura de cooperativas de crédito e dos 5 maiores bancos")
     print(
         f"{config.nome_do_recorte()} — dados do BACEN de {config.DATA_DADOS}"
     )
@@ -351,6 +367,14 @@ def _anunciar_inicio(args: argparse.Namespace) -> None:
     print(f"  Malha do IBGE : {malha}")
     print(f"  CNEFE         : {cnefe}")
     print(f"  Log           : {'DEBUG' if args.verbose else 'INFO'}")
+    if faltando and not args.sem_cache_cnefe:
+        print(
+            f"\n  ATENÇÃO: faltam {len(faltando)} arquivo(s) do CNEFE em cache. "
+            "São centenas de MB\n"
+            "  a alguns GB de download, uma vez só. Para um recorte menor e "
+            "bem mais rápido,\n"
+            "  interrompa e rode `python main.py --ufs Sul` (3 UFs, ~580 MB)."
+        )
 
 
 def _anunciar_fim(destino: Path) -> None:

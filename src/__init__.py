@@ -1,1 +1,1 @@
-"""Pacote principal do projeto mapa-if-sul."""
+"""Pacote principal do projeto mapa-if-br."""

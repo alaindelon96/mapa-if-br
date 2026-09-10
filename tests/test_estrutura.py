@@ -136,7 +136,15 @@ def test_ponto_sem_codigo_ibge_nao_derruba_o_posicionamento():
 
 
 def test_caminhos_apontam_para_o_projeto():
-    assert config.BASE_DIR.name == "mapa-if-sul"
+    """`BASE_DIR` é a raiz do projeto, e os demais caminhos penduram nela.
+
+    A raiz é reconhecida pelo que ela CONTÉM, e não pelo nome da pasta. O teste
+    exigia `BASE_DIR.name == "mapa-if-sul"`, o que amarrava a suíte ao nome do
+    diretório de quem clonou: renomear o repositório — ou clonar para uma pasta
+    com outro nome — reprovava um projeto perfeitamente sadio.
+    """
+    assert (config.BASE_DIR / "main.py").is_file()
+    assert (config.BASE_DIR / "src" / "config.py").is_file()
     assert config.RAW_DIR == config.BASE_DIR / "data" / "raw"
     assert config.PROCESSED_DIR == config.BASE_DIR / "data" / "processed"
     assert config.OUTPUT_DIR == config.BASE_DIR / "output"

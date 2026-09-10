@@ -1,11 +1,12 @@
-# mapa-if-sul
+# mapa-if-br
 
 Mapa interativo da **cobertura de cooperativas de crédito e dos cinco maiores
 bancos no Brasil** — as 27 unidades da federação, numa única página.
 
-> O nome do repositório é de quando o recorte era a Região Sul. O projeto nasceu
-> ali e cresceu para o país; o recorte hoje é um parâmetro (`--ufs`), e a Região
-> Sul continua sendo o padrão de quem roda sem argumentos.
+> O projeto nasceu cobrindo só a Região Sul, e se chamava `mapa-if-sul`. O
+> recorte hoje é um parâmetro (`--ufs`) e o padrão é o país inteiro — inclusive
+> para quem roda sem argumentos, de modo que a primeira execução reproduza o
+> mapa publicado. Rodar `--ufs Sul` refaz o recorte original.
 
 ## 1. O que é e para que serve
 
@@ -344,10 +345,13 @@ impresso na tela:
 Abra o mapa no navegador: ...\output\mapa_if_sul.html
 ```
 
-Para o país inteiro:
+**Sem argumentos, isso gera o país inteiro** — o mesmo recorte do mapa
+publicado. Na primeira execução são ~3,9 GB de CNEFE para baixar; o programa
+avisa quantos arquivos faltam antes de começar, para dar tempo de interromper e
+pedir menos:
 
 ```bash
-python main.py --ufs BR
+python main.py --ufs Sul
 ```
 
 Ordens de grandeza medidas nesta máquina, com tudo em cache: a Região Sul leva
@@ -359,7 +363,7 @@ Opções:
 
 | Argumento | Efeito |
 |---|---|
-| `--ufs RECORTE` | recorte territorial: `BR` para as 27 UFs, o nome de uma região (`Norte`, `Nordeste`, `Centro-Oeste`, `Sudeste`, `Sul`) ou siglas separadas por vírgula (`--ufs RS,SC,PR`). Padrão: a Região Sul. |
+| `--ufs RECORTE` | recorte territorial: `BR` para as 27 UFs, o nome de uma região (`Norte`, `Nordeste`, `Centro-Oeste`, `Sudeste`, `Sul`) ou siglas separadas por vírgula (`--ufs RS,SC,PR`). **Padrão: `BR`.** Um recorte menor baixa menos CNEFE e roda em uma fração do tempo. |
 | `--sem-cache-malha` | rebaixa a malha municipal da API do IBGE. Necessário só quando a divisão territorial muda. |
 | `--sem-cache-cnefe` | rebaixa os ZIP do CNEFE (um por UF do recorte). Necessário só para se recuperar de um cache corrompido. |
 | `-v`, `--verbose` | log de nível DEBUG e traceback completo em caso de falha. |
@@ -395,10 +399,12 @@ nacional passaria de 60 MB.
 | Região Sul (7.603 pontos) | 4,3 MB | 1,1 MB | 590 B |
 | Brasil (30.578 pontos) | 20,6 MB | 5,1 MB | 673 B |
 
-O `sul` nos nomes é o **slug do recorte**, e não parte fixa do nome: cada
-recorte grava com o seu (`if_br_categorizado.parquet`,
-`malha_municipios_sudeste.geojson`), de modo que trocar de recorte não
-sobrescreve o cache do anterior. Ver `config.slug_recorte`.
+O `sul` nos nomes acima é o **slug do recorte**, e não parte fixa do nome: cada
+recorte grava com o seu. Com o padrão, os arquivos saem
+`if_br_categorizado.parquet`, `malha_municipios_br.geojson`,
+`mapa_if_br.html`; com `--ufs Sudeste`, `malha_municipios_sudeste.geojson`. É o
+que permite manter dois recortes lado a lado sem um sobrescrever o cache do
+outro. Ver `config.slug_recorte`.
 
 A etapa 5 termina chamando `src.embutir`, que troca as tags de CDN escritas
 pelo folium pelo conteúdo dos arquivos. São ~700 KB em 14 bibliotecas,
@@ -418,11 +424,11 @@ se perdeu no join com a malha, toda coordenada cai dentro do polígono do própr
 município, toda geometria é poligonal. Rode o pipeline antes; sem os artefatos
 eles falham com a instrução.
 
-Eles conferem o **recorte ativo**, que sem nada é a Região Sul. Para conferir os
+Eles conferem o **recorte ativo**, que sem nada é o Brasil. Para conferir os
 artefatos de outro recorte:
 
 ```bash
-MAPA_IF_UFS=BR pytest
+MAPA_IF_UFS=Sul pytest
 ```
 
 ## 5. Limitações conhecidas
@@ -531,7 +537,7 @@ As três fontes têm datas diferentes, e o mapa as sobrepõe assim mesmo:
 ## Publicação
 
 O mapa é publicado no GitHub Pages, em
-<https://alaindelon96.github.io/mapa-if-sul/>.
+<https://alaindelon96.github.io/mapa-if-br/>.
 
 Os artefatos gerados vivem numa branch **órfã `gh-pages`**, e não na `main`. A
 `main` guarda só o código; o `.gitignore` a impede de aceitar HTML gerado de
@@ -585,7 +591,7 @@ região em vez de um do país inteiro.
 ## Estrutura
 
 ```
-mapa-if-sul/
+mapa-if-br/
 ├── data/
 │   ├── raw/          # dados de entrada originais (não versionados)
 │   └── processed/    # dados tratados, prontos para uso
